@@ -13,3 +13,10 @@ tokio = { version = "1.32.0", features = ["io-util"] }
 
 [dev-dependencies]
 tokio = { version = "1.32.0", features = ["macros", "net", "rt"] }
+
+[workspace]
+resolver = "2"
+members = [
+  ".",
+  "proxy"
+]
