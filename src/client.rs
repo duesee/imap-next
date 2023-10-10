@@ -22,6 +22,15 @@ pub struct ClientFlowOptions {
     pub crlf_relaxed: bool,
 }
 
+impl Default for ClientFlowOptions {
+    fn default() -> Self {
+        Self {
+            // Lean towards usability
+            crlf_relaxed: true,
+        }
+    }
+}
+
 pub struct ClientFlow {
     stream: AnyStream,
 

@@ -21,6 +21,17 @@ pub struct ServerFlowOptions {
     pub max_literal_size: u32,
 }
 
+impl Default for ServerFlowOptions {
+    fn default() -> Self {
+        Self {
+            // Lean towards usability
+            crlf_relaxed: true,
+            // 25 MiB is a common maximum email size (Oct. 2023)
+            max_literal_size: 25 * 1024 * 1024,
+        }
+    }
+}
+
 pub struct ServerFlow {
     stream: AnyStream,
     max_literal_size: u32,
