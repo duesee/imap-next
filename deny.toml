@@ -2,5 +2,10 @@
 unknown-registry = "deny"
 unknown-git      = "deny"
 
+# TODO
+allow-git = [
+    "https://github.com/duesee/imap-codec",
+]
+
 [licenses]
 allow = [ "Apache-2.0", "MIT", "Unicode-DFS-2016" ]

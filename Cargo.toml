@@ -19,3 +19,8 @@ resolver = "2"
 members = [
   "proxy"
 ]
+
+# TODO: Use versions from crates.io
+[patch.crates-io]
+imap-codec = { git = "https://github.com/duesee/imap-codec" }
+imap-types = { git = "https://github.com/duesee/imap-codec" }
