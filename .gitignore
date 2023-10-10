@@ -3,3 +3,6 @@
 
 # IntelliJ, CLion, RustRover, ...
 .idea
+
+# direnv (https://direnv.net/)
+.envrc
