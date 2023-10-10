@@ -2,17 +2,17 @@ name: Measure test coverage
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
-      - '**.rs'
-      - '**.toml'
-      - '.github/workflows/**'
+      - "**.rs"
+      - "**.toml"
+      - ".github/workflows/**"
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths:
-      - '**.rs'
-      - '**.toml'
-      - '.github/workflows/**'
+      - "**.rs"
+      - "**.toml"
+      - ".github/workflows/**"
   workflow_dispatch:
 
 concurrency:
@@ -46,9 +46,8 @@ jobs:
             --output-types "lcov" \
             --llvm > coveralls.lcov
 
-            # TODO
-            #- name: Upload to Coveralls
-            #uses: coverallsapp/github-action@v2
-            #with:
-            #format: lcov
-            #file: coveralls.lcov
+      - name: Upload to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          format: lcov
+          file: coveralls.lcov
