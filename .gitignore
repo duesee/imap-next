@@ -1,2 +1,5 @@
 /target
 /Cargo.lock
+
+# IntelliJ, CLion, RustRover, ...
+.idea
