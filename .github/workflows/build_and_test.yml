@@ -98,9 +98,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Setup | Install packages
-        run: sudo apt-get install libssl-dev
-
       - name: Setup | Install toolchain
         run: |
           # 1.66 is the Minimum Supported Rust Version (MSRV) for imap-flow.
