@@ -1,4 +1,7 @@
-use std::path::Path;
+use std::{
+    fmt::{Display, Formatter},
+    path::Path,
+};
 
 use serde::Deserialize;
 use thiserror::Error;
@@ -13,6 +16,17 @@ pub struct Service {
     pub name: String,
     pub bind: Addr,
     pub connect: Addr,
+}
+
+impl Display for Addr {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let scheme = match self.security {
+            Security::Insecure => "imap",
+            Security::Tls => "imaps",
+        };
+
+        write!(f, "{}://{}:{}", scheme, self.host, self.port)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
