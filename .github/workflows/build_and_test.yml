@@ -100,8 +100,8 @@ jobs:
 
       - name: Setup | Install toolchain
         run: |
-          # 1.65 is the Minimum Supported Rust Version (MSRV) for imap-codec.
-          rustup toolchain install 1.65 --profile minimal
+          # 1.66 is the Minimum Supported Rust Version (MSRV) for imap-flow.
+          rustup toolchain install 1.66 --profile minimal
           rustup toolchain install nightly --profile minimal
 
       - name: Setup | Cache dependencies
@@ -113,8 +113,8 @@ jobs:
       - name: Check
         run: |
           cargo +nightly update -Z minimal-versions
-          cargo +1.65 check --workspace --all-targets --all-features
-          cargo +1.65 test --workspace --all-targets --all-features # TODO: exclude fuzz-targets
+          cargo +1.66 check --workspace --all-targets --all-features
+          cargo +1.66 test --workspace --all-targets --all-features # TODO: exclude fuzz-targets
         env:
           RUSTFLAGS: -Dwarnings
 
