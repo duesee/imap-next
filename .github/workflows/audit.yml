@@ -3,7 +3,7 @@ name: Audit
 on:
   schedule:
     # 21:43 on Wednesday and Sunday. (Thanks, crontab.guru)
-    - cron: '43 21 * * 3,0'
+    - cron: "43 21 * * 3,0"
   workflow_dispatch:
 
 jobs:
@@ -11,5 +11,5 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@1e59595bed8fc55c969333d08d7817b36888f0c5
