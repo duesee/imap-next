@@ -2,17 +2,17 @@ name: Check API
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
-      - '**.rs'
-      - '**.toml'
-      - '.github/workflows/**'
+      - "**.rs"
+      - "**.toml"
+      - ".github/workflows/**"
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths:
-      - '**.rs'
-      - '**.toml'
-      - '.github/workflows/**'
+      - "**.rs"
+      - "**.toml"
+      - ".github/workflows/**"
   workflow_dispatch:
 
 concurrency:
