@@ -31,6 +31,9 @@ async fn main() -> Result<()> {
     // Start proxy services
     let mut set = JoinSet::new();
     for service in config.services {
+        println!("# {}", service.name);
+        println!("{} -> {}\n", service.bind, service.connect);
+
         set.spawn(handle_service(service));
     }
 
