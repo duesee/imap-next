@@ -133,32 +133,23 @@ jobs:
 
     steps:
       - name: Install toolchain
-        uses: actions-rs/toolchain@88dc2356392166efad76775c878094f4e83ff746
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
           components: clippy
 
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Check for common mistakes and missed improvements
-        uses: actions-rs/clippy-check@b5b5f21f4797c02da247df37026fcd0a5024aa4d
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features
+        run: cargo clippy --all-features
 
   formatting:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install nightly toolchain
-        uses: actions-rs/toolchain@88dc2356392166efad76775c878094f4e83ff746
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          profile: minimal
-          toolchain: nightly
-          override: true
           components: rustfmt
 
       - name: Checkout code
