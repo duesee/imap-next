@@ -5,6 +5,7 @@ use tokio::io::AsyncReadExt;
 
 use crate::stream::AnyStream;
 
+#[derive(Debug)]
 pub struct ReceiveState<C: Decoder> {
     codec: C,
     crlf_relaxed: bool,
@@ -138,7 +139,7 @@ pub enum ReceiveEvent<C: Decoder> {
 }
 
 // The next fragment that will be read...
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 enum NextFragment {
     // ... is a line.
     //

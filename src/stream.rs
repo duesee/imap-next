@@ -1,13 +1,14 @@
-use std::pin::Pin;
+use std::{fmt::Debug, pin::Pin};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
 // TODO: Reconsider this. Do we really need Stream + AnyStream? What is the smallest API that we need to expose?
 
-pub trait Stream: AsyncRead + AsyncWrite + Send {}
+pub trait Stream: AsyncRead + AsyncWrite + Send + Debug {}
 
-impl<S: AsyncRead + AsyncWrite + Send> Stream for S {}
+impl<S: AsyncRead + AsyncWrite + Send + Debug> Stream for S {}
 
+#[derive(Debug)]
 pub struct AnyStream(pub Pin<Box<dyn Stream>>);
 
 impl AnyStream {

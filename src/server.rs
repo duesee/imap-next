@@ -32,6 +32,7 @@ impl Default for ServerFlowOptions {
     }
 }
 
+#[derive(Debug)]
 pub struct ServerFlow {
     stream: AnyStream,
     max_literal_size: u32,
