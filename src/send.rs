@@ -10,6 +10,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::stream::AnyStream;
 
+#[derive(Debug)]
 pub struct SendCommandState<K> {
     codec: CommandCodec,
     // The commands that should be send.
@@ -139,11 +140,13 @@ impl<K> SendCommandState<K> {
     }
 }
 
+#[derive(Debug)]
 struct SendCommandQueueEntry<K> {
     key: K,
     fragments: VecDeque<Fragment>,
 }
 
+#[derive(Debug)]
 struct SendCommandProgress<K> {
     key: K,
     // If defined this literal need to be sent before `next_fragments`.
@@ -152,6 +155,7 @@ struct SendCommandProgress<K> {
     next_fragments: VecDeque<Fragment>,
 }
 
+#[derive(Debug)]
 struct SendCommandLiteralProgress {
     // The bytes of the literal.
     data: Vec<u8>,
@@ -159,6 +163,7 @@ struct SendCommandLiteralProgress {
     received_continue: bool,
 }
 
+#[derive(Debug)]
 pub struct SendResponseState<C: Encoder, K> {
     codec: C,
     // The responses that should be sent.
@@ -230,6 +235,7 @@ impl<C: Encoder, K> SendResponseState<C, K> {
     }
 }
 
+#[derive(Debug)]
 struct SendResponseQueueEntry<K> {
     key: K,
     fragments: Vec<Fragment>,

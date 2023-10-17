@@ -31,6 +31,7 @@ impl Default for ClientFlowOptions {
     }
 }
 
+#[derive(Debug)]
 pub struct ClientFlow {
     stream: AnyStream,
 
