@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 pub mod client;
 mod receive;
 mod send;
