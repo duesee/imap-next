@@ -3,6 +3,7 @@ use imap_codec::{
     decode::CommandDecodeError,
     imap_types::{
         command::Command,
+        core::Text,
         response::{CommandContinuationRequest, Data, Greeting, Response, Status},
     },
     CommandCodec, GreetingCodec, ResponseCodec,
@@ -15,10 +16,12 @@ use crate::{
     stream::AnyStream,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ServerFlowOptions {
     pub crlf_relaxed: bool,
     pub max_literal_size: u32,
+    pub literal_accept_text: Text<'static>,
+    pub literal_reject_text: Text<'static>,
 }
 
 impl Default for ServerFlowOptions {
@@ -28,6 +31,10 @@ impl Default for ServerFlowOptions {
             crlf_relaxed: true,
             // 25 MiB is a common maximum email size (Oct. 2023)
             max_literal_size: 25 * 1024 * 1024,
+            // Short unmeaning text
+            literal_accept_text: Text::unvalidated("..."),
+            // Short unmeaning text
+            literal_reject_text: Text::unvalidated("..."),
         }
     }
 }
@@ -40,6 +47,9 @@ pub struct ServerFlow {
     next_response_handle: ServerFlowResponseHandle,
     send_response_state: SendResponseState<ResponseCodec, Option<ServerFlowResponseHandle>>,
     receive_command_state: ReceiveState<CommandCodec>,
+
+    literal_accept_text: Text<'static>,
+    literal_reject_text: Text<'static>,
 }
 
 impl ServerFlow {
@@ -67,6 +77,8 @@ impl ServerFlow {
             next_response_handle: ServerFlowResponseHandle(0),
             send_response_state,
             receive_command_state,
+            literal_accept_text: options.literal_accept_text,
+            literal_reject_text: options.literal_reject_text,
         };
 
         Ok(server_flow)
@@ -131,7 +143,8 @@ impl ServerFlow {
 
                     // Inform the client that the literal was rejected.
                     // This should never fail because the text is not Base64.
-                    let status = Status::no(Some(tag), None, "Computer says no").unwrap();
+                    let status =
+                        Status::no(Some(tag), None, self.literal_reject_text.clone()).unwrap();
                     self.send_response_state
                         .enqueue(None, Response::Status(status));
 
@@ -141,7 +154,9 @@ impl ServerFlow {
 
                     // Inform the client that the literal was accepted.
                     // This should never fail because the text is not Base64.
-                    let cont = CommandContinuationRequest::basic(None, "Please, continue").unwrap();
+                    let cont =
+                        CommandContinuationRequest::basic(None, self.literal_accept_text.clone())
+                            .unwrap();
                     self.send_response_state
                         .enqueue(None, Response::CommandContinuationRequest(cont));
 

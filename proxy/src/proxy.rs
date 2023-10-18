@@ -152,10 +152,7 @@ impl Proxy<ConnectedState> {
 
         let mut client_to_proxy = {
             // TODO: Read options from config
-            let options = ServerFlowOptions {
-                crlf_relaxed: true,
-                max_literal_size: u32::MAX,
-            };
+            let options = ServerFlowOptions::default();
 
             let result =
                 ServerFlow::send_greeting(self.state.client_to_proxy, options, greeting).await;
