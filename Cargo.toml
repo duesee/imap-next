@@ -17,7 +17,12 @@ tokio = { version = "1.32.0", features = ["macros", "net", "rt"] }
 [workspace]
 resolver = "2"
 members = [
-  "proxy"
+  # Draft higher-level client library (and not an example)
+  "client",
+  # Draft example project exercising imap-flow
+  "cli",
+  # Draft IMAP proxy application (and not an example)
+  "proxy",
 ]
 
 # TODO: Use versions from crates.io
