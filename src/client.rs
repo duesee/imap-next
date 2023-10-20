@@ -158,6 +158,8 @@ impl ClientFlow {
             return;
         };
 
+        // TODO(#45): Should we handle Status::No here?
+        // TODO(#46): Emit event with status and handle to client. Reuse StatusReceived? Introduce CommandRejected?
         match status {
             Status::Bad {
                 tag: Some(status_tag),
