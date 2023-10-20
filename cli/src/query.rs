@@ -5,11 +5,9 @@ use imap_codec::imap_types::{
     core::NonEmptyVec,
     envelope::Envelope,
     fetch::{MessageDataItem, MessageDataItemName, Part, Section},
-    mailbox::Mailbox,
 };
 use tracing::{info, warn};
 
-/// Query data from an IMAP server.
 pub(crate) async fn query(
     host: &str,
     port: u16,
@@ -20,11 +18,8 @@ pub(crate) async fn query(
 
     // Real-world:
     // * Handle `_greeting`
-    //   * Handle Ok, PreAuth, Bye
-    //   * Handle Code::Capability
-
-    // TODO
-    // if client.has_pre_auth_capabilities() {}
+    //   * Handle `Ok`, `PreAuth`, `Bye`
+    //   * Handle `Code::Capability`
 
     // Real-world:
     // * Obtain capabilities
@@ -42,17 +37,9 @@ pub(crate) async fn query(
     let mailboxes = client.list("", "*").await?;
 
     loop {
+        println!("# Folders\n");
         for (index, mailbox) in mailboxes.iter().enumerate() {
-            let mailbox = match mailbox.2 {
-                Mailbox::Inbox => "INBOX",
-                Mailbox::Other(ref other) => {
-                    std::str::from_utf8(other.as_ref()).unwrap_or("<invalid UTF-8>")
-                }
-            };
-
-            // Real-world:
-            // * Encoding
-            println!("{index}: {}", mailbox);
+            println!("{index:>5}: {}", mailbox.to_pretty());
         }
 
         println!();
@@ -76,12 +63,13 @@ pub(crate) async fn query(
             }
         };
 
-        // We use EXAMINE instead of SELECT to select a mailbox read-only
-        let mut session = client.examine(to_be_selected_mailbox.2.clone()).await?;
+        // Use EXAMINE (instead of SELECT) to select the mailbox in read-only mode
+        let mut session = client.examine(to_be_selected_mailbox).await?;
+        println!("## Selected\n");
         println!("{:#?}\n", session.session_data);
 
         if session.session_data.exists == Some(0) {
-            // Don't try to fetch emails from an empty mailbox
+            // Don't attempt to fetch emails from an empty mailbox
             info!("Skipping fetch from empty mailbox");
             continue;
         }
@@ -128,9 +116,11 @@ pub(crate) async fn query(
 
         match res {
             Ok(fetches) => {
+                println!("### Fetches\n");
                 for (seq, items) in fetches {
                     let mut subject = None;
 
+                    // TODO: Ask for "Subject" header only
                     for item in items {
                         if let MessageDataItem::Envelope(Envelope {
                             subject: nstring, ..
@@ -150,7 +140,7 @@ pub(crate) async fn query(
                         None => String::from("<server didn't return an envelope>"),
                     };
 
-                    println!("# {seq}: {subject}");
+                    println!("{seq:>5}: {subject}");
                 }
             }
             Err(error) => {

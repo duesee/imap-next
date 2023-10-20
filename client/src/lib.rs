@@ -9,7 +9,7 @@ use imap_codec::imap_types::{
     core::{NonEmptyVec, QuotedChar, Tag},
     fetch::{MacroOrMessageDataItemNames, MessageDataItem},
     flag::{Flag, FlagNameAttribute, FlagPerm},
-    mailbox::{ListMailbox, Mailbox},
+    mailbox::{ListMailbox as ListMailboxRaw, Mailbox as MailboxRaw},
     response::{Capability, Code, Data, Greeting, Status},
     sequence::SequenceSet,
 };
@@ -30,12 +30,70 @@ pub struct Client {
     tag_generator: TagGenerator,
 }
 
-/*
-struct MailboxHigh {
-    Inbox(String),
-    Other(String),
+// Introduce Mailbox<Raw> -> Mailbox
+
+#[derive(Clone, Debug)]
+pub struct Mailbox {
+    pub items: Vec<FlagNameAttribute<'static>>,
+    pub name: MailboxName,
 }
-*/
+
+#[derive(Clone, Debug)]
+pub struct MailboxName {
+    pub delimiter: Option<QuotedChar>,
+    pub data: MailboxNameData,
+}
+
+#[derive(Clone, Debug)]
+pub enum MailboxNameData {
+    /// INBOX (or a subfolder of INBOX)
+    ///
+    /// Examples (with hierarchy delimiter "."):
+    ///
+    /// * inbox => Inbox(vec![])
+    /// * inboX => Inbox(vec![])
+    /// * ...
+    /// * INBOX => Inbox(vec![])
+    ///
+    /// * inbox.subfolder => Inbox(vec!["subfolder"])
+    /// * inboX.subfolder => Inbox(vec!["subfolder"])
+    /// * ...
+    /// * INBOX.subfolder => Inbox(vec!["subfolder"])
+    ///
+    /// * INBOX.iNboX => Inbox(vec!["iNboX"])
+    Inbox(Vec<String>),
+    /// A folder that is not a child of Inbox
+    ///
+    /// Examples (with hierarchy delimiter "."):
+    ///
+    /// * inbox_ => Inbox(vec![])
+    /// * inbox/foo => Other(vec!["inbox/foo"])
+    Other(Vec<String>),
+}
+
+impl Mailbox {
+    pub fn to_pretty(&self) -> String {
+        // FIXME
+        let delimiter = self.name.delimiter.unwrap().inner();
+
+        match &self.name.data {
+            MailboxNameData::Inbox(path) if path.is_empty() => String::from("INBOX"),
+            MailboxNameData::Inbox(path) => {
+                format!(
+                    "INBOX{}{}",
+                    delimiter,
+                    path.join(delimiter.to_string().as_str())
+                )
+            }
+            MailboxNameData::Other(path) => path.join(delimiter.to_string().as_str()),
+        }
+    }
+
+    pub fn into_mailbox_raw(self) -> MailboxRaw<'static> {
+        // FIXME
+        MailboxRaw::try_from(self.to_pretty()).unwrap()
+    }
+}
 
 impl Client {
     #[instrument]
@@ -166,17 +224,10 @@ impl Client {
         &mut self,
         reference: &str,
         mailbox_wildcard: &str,
-    ) -> Result<
-        Vec<(
-            Vec<FlagNameAttribute<'static>>,
-            Option<QuotedChar>,
-            Mailbox<'static>,
-        )>,
-        Box<dyn Error>,
-    > {
+    ) -> Result<Vec<Mailbox>, Box<dyn Error>> {
         let cmd = {
-            let reference = Mailbox::try_from(reference)?;
-            let mailbox_wildcard = ListMailbox::try_from(mailbox_wildcard)?;
+            let reference = MailboxRaw::try_from(reference)?;
+            let mailbox_wildcard = ListMailboxRaw::try_from(mailbox_wildcard)?;
 
             let tag = self.tag_generator.generate();
             let body = CommandBody::List {
@@ -205,7 +256,47 @@ impl Client {
                         delimiter,
                         mailbox,
                     } => {
-                        lists.push((items, delimiter, mailbox));
+                        let mailbox = match mailbox {
+                            MailboxRaw::Inbox => Mailbox {
+                                items,
+                                name: MailboxName {
+                                    delimiter,
+                                    data: MailboxNameData::Inbox(vec![]),
+                                },
+                            },
+                            MailboxRaw::Other(other) => {
+                                // FIXME: Handle non-UTF8
+                                let decoded = utf7_imap::decode_utf7_imap(
+                                    std::str::from_utf8(other.as_ref()).unwrap().to_string(),
+                                );
+
+                                if let Some(delimiter) = delimiter {
+                                    Mailbox {
+                                        items,
+                                        name: MailboxName {
+                                            delimiter: Some(delimiter),
+                                            data: MailboxNameData::Other(
+                                                decoded
+                                                    .split(delimiter.inner())
+                                                    .map(|s| s.to_string())
+                                                    .collect(),
+                                            ),
+                                        },
+                                    }
+                                } else {
+                                    warn!("No delimiter? What to do?");
+                                    Mailbox {
+                                        items,
+                                        name: MailboxName {
+                                            delimiter: None,
+                                            data: MailboxNameData::Other(vec![decoded]),
+                                        },
+                                    }
+                                }
+                            }
+                        };
+
+                        lists.push(mailbox);
                     }
                     _ => warn!(?data, "unexpected data"),
                 },
@@ -227,10 +318,12 @@ impl Client {
     }
 
     #[instrument(skip_all)]
-    pub async fn select(&mut self, mailbox: Mailbox<'static>) -> Result<Session, Box<dyn Error>> {
+    pub async fn select(&mut self, mailbox: Mailbox) -> Result<Session, Box<dyn Error>> {
         let cmd = {
             let tag = self.tag_generator.generate();
-            let body = CommandBody::Select { mailbox };
+            let body = CommandBody::Select {
+                mailbox: mailbox.into_mailbox_raw(),
+            };
 
             Command { tag, body }
         };
@@ -241,10 +334,13 @@ impl Client {
     }
 
     #[instrument(skip_all)]
-    pub async fn examine(&mut self, mailbox: Mailbox<'static>) -> Result<Session, Box<dyn Error>> {
+    pub async fn examine(&mut self, mailbox: &Mailbox) -> Result<Session, Box<dyn Error>> {
         let cmd = {
             let tag = self.tag_generator.generate();
-            let body = CommandBody::Examine { mailbox };
+            let body = CommandBody::Examine {
+                // TODO
+                mailbox: mailbox.clone().into_mailbox_raw(),
+            };
 
             Command { tag, body }
         };
@@ -333,6 +429,7 @@ pub struct Session<'a> {
 }
 
 impl<'s> Session<'s> {
+    // TODO: Asynchronously return list
     #[instrument(skip_all)]
     pub async fn fetch<S, I>(
         &mut self,
