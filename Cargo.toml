@@ -19,4 +19,8 @@ resolver = "2"
 members = [
     "proxy",
     "tag-generator",
+    "tasks",
 ]
+
+[patch.crates-io]
+imap-types = { git = "https://github.com/duesee/imap-codec" }
