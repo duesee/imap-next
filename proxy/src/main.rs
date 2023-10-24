@@ -29,8 +29,10 @@ async fn main() -> Result<()> {
         .without_time()
         .init();
 
+    // Process program arguments
     let args: Arguments = argh::from_env();
 
+    // Load config file
     let config = Config::load(&args.config)
         .with_context(|| format!("Failed to load config from path '{}'", args.config))?;
 
