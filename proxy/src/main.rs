@@ -3,11 +3,20 @@ mod proxy;
 mod util;
 
 use anyhow::{Context, Result};
+use argh::FromArgs;
 use config::{Config, Service};
 use proxy::{ClientAcceptedState, Proxy};
 use tokio::task::JoinSet;
 use tracing::{error, instrument, Instrument};
 use tracing_subscriber::EnvFilter;
+
+/// IMAP proxy.
+#[derive(FromArgs)]
+struct Arguments {
+    /// optional config path ("config.toml" by default)
+    #[argh(option, default = "String::from(\"config.toml\")")]
+    config: String,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -20,13 +29,10 @@ async fn main() -> Result<()> {
         .without_time()
         .init();
 
-    // Load config file
-    let config = {
-        let config_path = std::env::args().nth(1).unwrap_or("config.toml".to_string());
+    let args: Arguments = argh::from_env();
 
-        Config::load(&config_path)
-            .with_context(|| format!("Failed to load config from '{config_path}'"))?
-    };
+    let config = Config::load(&args.config)
+        .with_context(|| format!("Failed to load config from path '{}'", args.config))?;
 
     // Start proxy services
     let mut set = JoinSet::new();

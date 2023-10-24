@@ -1,24 +1,5 @@
 [[services]]
-name = "Testing"
+name = "Just an example"
 bind = { host = "127.0.0.1", port = 1143, security = "Insecure" }
-connect = { host = "127.0.0.1", port = 9143, security = "Insecure" }
+connect = { host = "imap.example.org", port = 993 }
 
-[[services]]
-name = "GMX"
-bind = { host = "127.0.0.1", port = 2143, security = "Insecure" }
-connect = { host = "imap.gmx.de", port = 993 }
-
-[[services]]
-name = "mailbox.org"
-bind = { host = "127.0.0.1", port = 3143, security = "Insecure" }
-connect = { host = "imap.mailbox.org", port = 993 }
-
-[[services]]
-name = "Zoho Mail"
-bind = { host = "127.0.0.1", port = 4143, security = "Insecure" }
-connect = { host = "imap.zoho.eu", port = 993 }
-
-[[services]]
-name = "iCloud"
-bind = { host = "127.0.0.1", port = 5143, security = "Insecure" }
-connect = { host = "imap.mail.me.com", port = 993 }
