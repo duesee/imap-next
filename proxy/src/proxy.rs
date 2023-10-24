@@ -102,10 +102,15 @@ impl Proxy<ClientAcceptedState> {
                         root_store
                     };
 
-                    ClientConfig::builder()
+                    let mut config = ClientConfig::builder()
                         .with_safe_defaults()
                         .with_root_certificates(root_store)
-                        .with_no_client_auth()
+                        .with_no_client_auth();
+
+                    // See <https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml#alpn-protocol-ids>
+                    config.alpn_protocols = vec![b"imap".to_vec()];
+
+                    config
                 };
 
                 let connector = TlsConnector::from(Arc::new(config));
