@@ -85,21 +85,29 @@ impl Proxy<ClientAcceptedState> {
         info!(?server_addr_port, "Connecting to server");
         let proxy_to_server = match TcpStream::connect(&server_addr_port).await {
             Ok(stream_to_server) => {
-                let mut root_cert_store = RootCertStore::empty();
-                #[allow(deprecated)] // TODO(#47): Fix deprecation warning
-                root_cert_store.add_server_trust_anchors(
-                    webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
-                        OwnedTrustAnchor::from_subject_spki_name_constraints(
-                            ta.subject,
-                            ta.spki,
-                            ta.name_constraints,
-                        )
-                    }),
-                );
-                let config = ClientConfig::builder()
-                    .with_safe_defaults()
-                    .with_root_certificates(root_cert_store)
-                    .with_no_client_auth();
+                let config = {
+                    let root_store = {
+                        let mut root_store = RootCertStore::empty();
+
+                        root_store.add_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.iter().map(
+                            |ta| {
+                                OwnedTrustAnchor::from_subject_spki_name_constraints(
+                                    ta.subject,
+                                    ta.spki,
+                                    ta.name_constraints,
+                                )
+                            },
+                        ));
+
+                        root_store
+                    };
+
+                    ClientConfig::builder()
+                        .with_safe_defaults()
+                        .with_root_certificates(root_store)
+                        .with_no_client_auth()
+                };
+
                 let connector = TlsConnector::from(Arc::new(config));
                 let dnsname = ServerName::try_from(server_addr.as_str()).unwrap();
 
