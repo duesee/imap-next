@@ -82,6 +82,11 @@ impl ClientFlow {
         Ok((client_flow, greeting))
     }
 
+    /// Enqueues the [`Command`] for being sent to the client.
+    ///
+    /// The [`Command`] is not sent immediately but during one of the next calls of
+    /// [`ClientFlow::progress`]. All [`Command`]s are sent in the same order they have been
+    /// enqueued.
     pub fn enqueue_command(&mut self, command: Command<'_>) -> ClientFlowCommandHandle {
         let handle = self.next_command_handle;
         self.next_command_handle = ClientFlowCommandHandle(handle.0 + 1);
@@ -104,7 +109,7 @@ impl ClientFlow {
 
     async fn progress_command(&mut self) -> Result<Option<ClientFlowEvent>, ClientFlowError> {
         match self.send_command_state.progress(&mut self.stream).await? {
-            Some((tag, handle)) => Ok(Some(ClientFlowEvent::CommandSent { tag, handle })),
+            Some((tag, handle)) => Ok(Some(ClientFlowEvent::CommandSent { handle, tag })),
             None => Ok(None),
         }
     }
@@ -139,8 +144,15 @@ impl ClientFlow {
 
             match response {
                 Response::Status(status) => {
-                    self.maybe_abort_command(&status);
-                    break Some(ClientFlowEvent::StatusReceived { status });
+                    if let Some((tag, handle)) = self.maybe_abort_command(&status) {
+                        break Some(ClientFlowEvent::CommandRejected {
+                            handle,
+                            tag,
+                            status,
+                        });
+                    } else {
+                        break Some(ClientFlowEvent::StatusReceived { status });
+                    }
                 }
                 Response::Data(data) => break Some(ClientFlowEvent::DataReceived { data }),
                 Response::CommandContinuationRequest(_) => {
@@ -153,33 +165,51 @@ impl ClientFlow {
         Ok(event)
     }
 
-    fn maybe_abort_command(&mut self, status: &Status) {
-        let Some((command_tag, _)) = self.send_command_state.command_in_progress() else {
-            return;
-        };
+    fn maybe_abort_command(
+        &mut self,
+        status: &Status,
+    ) -> Option<(Tag<'static>, ClientFlowCommandHandle)> {
+        let (command_tag, _) = self.send_command_state.command_in_progress()?;
 
-        // TODO(#45): Should we handle Status::No here?
-        // TODO(#46): Emit event with status and handle to client. Reuse StatusReceived? Introduce CommandRejected?
         match status {
             Status::Bad {
                 tag: Some(status_tag),
                 ..
-            } if status_tag == command_tag => {
-                self.send_command_state.abort_command();
-            }
-            _ => (),
+            } if status_tag == command_tag => self.send_command_state.abort_command(),
+            _ => None,
         }
     }
 }
 
+/// A handle for an enqueued [`Command`].
+///
+/// This handle can be used to track the sending progress. After a [`Command`] was enqueued via
+/// [`ClientFlow::enqueue_command`] it is in the process of being sent until
+/// [`ClientFlow::progress`] returns a [`ClientFlowEvent::CommandSent`] or
+/// [`ClientFlowEvent::CommandRejected`] with the corresponding handle.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct ClientFlowCommandHandle(u64);
 
 #[derive(Debug)]
 pub enum ClientFlowEvent {
+    /// The enqueued [`Command`] was sent successfully.
     CommandSent {
-        tag: Tag<'static>,
+        /// The handle of the enqueued [`Command`].
         handle: ClientFlowCommandHandle,
+        /// The [`Tag`] of the enqueued [`Command`].
+        tag: Tag<'static>,
+    },
+    /// The enqueued [`Command`] wasn't sent completely because the server rejected it.
+    CommandRejected {
+        /// The handle of the enqueued [`Command`].
+        handle: ClientFlowCommandHandle,
+        /// The [`Tag`] of the enqueued [`Command`].
+        tag: Tag<'static>,
+        /// The [`Status`] sent by the server in order to reject the [`Command`].
+        /// [`ClientFlow`] has already handled this [`Status`] but it might still have
+        /// useful information that could be logged or displayed to the user
+        /// (e.g. [`Code::Alert`](imap_codec::imap_types::response::Code::Alert)).
+        status: Status<'static>,
     },
     DataReceived {
         data: Data<'static>,

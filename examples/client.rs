@@ -26,10 +26,18 @@ async fn main() {
     loop {
         match client.progress().await.unwrap() {
             ClientFlowEvent::CommandSent {
-                tag,
                 handle: got_handle,
+                tag,
             } => {
-                println!("command sent: {tag:?}, {handle:?}");
+                println!("command sent: {got_handle:?}, {tag:?}");
+                assert_eq!(handle, got_handle);
+            }
+            ClientFlowEvent::CommandRejected {
+                handle: got_handle,
+                tag,
+                status,
+            } => {
+                println!("command rejected: {got_handle:?}, {tag:?}, {status:?}");
                 assert_eq!(handle, got_handle);
             }
             ClientFlowEvent::DataReceived { data } => {

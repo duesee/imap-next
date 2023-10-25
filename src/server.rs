@@ -84,6 +84,11 @@ impl ServerFlow {
         Ok(server_flow)
     }
 
+    /// Enqueues the [`Data`] response for being sent to the client.
+    ///
+    /// The response is not sent immediately but during one of the next calls of
+    /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
+    /// enqueued.
     pub fn enqueue_data(&mut self, data: Data<'_>) -> ServerFlowResponseHandle {
         let handle = self.next_response_handle();
         self.send_response_state
@@ -91,6 +96,11 @@ impl ServerFlow {
         handle
     }
 
+    /// Enqueues the [`Status`] response for being sent to the client.
+    ///
+    /// The response is not sent immediately but during one of the next calls of
+    /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
+    /// enqueued.
     pub fn enqueue_status(&mut self, status: Status<'_>) -> ServerFlowResponseHandle {
         let handle = self.next_response_handle();
         self.send_response_state
@@ -177,13 +187,25 @@ impl ServerFlow {
     }
 }
 
+/// A handle for an enqueued [`Response`].
+///
+/// This handle can be used to track the sending progress. After a [`Response`] was enqueued via
+/// [`ServerFlow::enqueue_data`] or [`ServerFlow::enqueue_status`] it is in the process of being
+/// sent until [`ServerFlow::progress`] returns a [`ServerFlowEvent::ResponseSent`] with the
+/// corresponding handle.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct ServerFlowResponseHandle(u64);
 
 #[derive(Debug)]
 pub enum ServerFlowEvent {
-    ResponseSent { handle: ServerFlowResponseHandle },
-    CommandReceived { command: Command<'static> },
+    /// The enqueued [`Response`] was sent successfully.
+    ResponseSent {
+        /// The handle of the enqueued [`Response`].
+        handle: ServerFlowResponseHandle,
+    },
+    CommandReceived {
+        command: Command<'static>,
+    },
 }
 
 #[derive(Debug, Error)]
