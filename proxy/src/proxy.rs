@@ -1,6 +1,10 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use colored::Colorize;
+use imap_codec::imap_types::{
+    core::Text,
+    response::{Code, Status},
+};
 use imap_flow::{
     client::{ClientFlow, ClientFlowError, ClientFlowEvent, ClientFlowOptions},
     server::{ServerFlow, ServerFlowError, ServerFlowEvent, ServerFlowOptions},
@@ -18,6 +22,10 @@ use crate::{
     config::Service,
     util::{self, ControlFlow},
 };
+
+const LITERAL_ACCEPT_TEXT: &str = "proxy: Literal accepted by proxy";
+const LITERAL_REJECT_TEXT: &str = "proxy: Literal rejected by proxy";
+const COMMAND_REJECTED_TEXT: &str = "proxy: Command rejected by server";
 
 #[derive(Debug, Error)]
 pub enum ProxyError {
@@ -165,7 +173,11 @@ impl Proxy<ConnectedState> {
 
         let mut client_to_proxy = {
             // TODO: Read options from config
-            let options = ServerFlowOptions::default();
+            let options = ServerFlowOptions {
+                literal_accept_text: Text::try_from(LITERAL_ACCEPT_TEXT).unwrap(),
+                literal_reject_text: Text::try_from(LITERAL_REJECT_TEXT).unwrap(),
+                ..Default::default()
+            };
 
             let result =
                 ServerFlow::send_greeting(self.state.client_to_proxy, options, greeting).await;
@@ -263,11 +275,39 @@ fn handle_server_event(
 
     match event {
         ClientFlowEvent::CommandSent {
-            tag,
             handle: _handle,
+            tag,
         } => {
             // TODO: log handle
             trace!(role = "p2s", ?tag, "---> Forwarded command");
+        }
+        ClientFlowEvent::CommandRejected {
+            handle: _handle,
+            tag,
+            status,
+        } => {
+            // TODO: log handle
+            trace!(role = "p2s", ?tag, ?status, "---> Aborted command");
+            let status = match status.code() {
+                Some(Code::Alert) => {
+                    // Keep the alert message because it MUST be displayed to the user
+                    Status::Bad {
+                        tag: Some(tag),
+                        code: Some(Code::Alert),
+                        text: status.text().clone(),
+                    }
+                }
+                _ => {
+                    // Use generic message because the original code and text might be misleading
+                    Status::Bad {
+                        tag: Some(tag),
+                        code: None,
+                        text: Text::try_from(COMMAND_REJECTED_TEXT).unwrap(),
+                    }
+                }
+            };
+            let _handle = client_to_proxy.enqueue_status(status);
+            // TODO: log handle
         }
         ClientFlowEvent::DataReceived { mut data } => {
             trace!(data=%format!("{:?}", data).blue(), role = "s2p", "<--| Received data");

@@ -42,9 +42,9 @@ impl<K> SendCommandState<K> {
         self.send_progress.as_ref().map(|x| &x.key)
     }
 
-    pub fn abort_command(&mut self) {
-        self.send_progress = None;
+    pub fn abort_command(&mut self) -> Option<K> {
         self.write_buffer.clear();
+        self.send_progress.take().map(|x| x.key)
     }
 
     pub fn continue_command(&mut self) {
