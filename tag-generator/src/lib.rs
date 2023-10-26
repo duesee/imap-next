@@ -65,7 +65,9 @@ mod tests {
 
         thread::scope(|s| {
             for _ in 1..=THREADS {
-                s.spawn(|| {
+                let sender = sender.clone();
+
+                s.spawn(move || {
                     let mut generator = TagGenerator::new();
                     thread::sleep(Duration::from_millis(random::<u8>() as u64));
 
