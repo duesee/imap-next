@@ -1,0 +1,8 @@
+[package]
+name = "tag-generator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+imap-types = { version = "1.0.0", features = ["unvalidated"] }
+rand = "0.8.5"
