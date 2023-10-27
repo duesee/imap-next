@@ -17,7 +17,8 @@ impl TagGenerator {
     ///
     /// Returns a `TagGenerator` generating tags with a unique prefix.
     pub fn new() -> TagGenerator {
-        let global = GLOBAL_TAG_GENERATOR_COUNT.fetch_add(1, Ordering::SeqCst);
+        // There is no synchronization required and we only care about each thread seeing a unique value.
+        let global = GLOBAL_TAG_GENERATOR_COUNT.fetch_add(1, Ordering::Relaxed);
         let counter = 0;
 
         TagGenerator { global, counter }
