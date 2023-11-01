@@ -1,7 +1,11 @@
+use std::{fs::File, io::BufReader, path::Path};
+
 use imap_codec::imap_types::{
     core::NonEmptyVec,
     response::{Capability, Code, Data, Greeting, Status},
 };
+use rustls::{Certificate, PrivateKey};
+use thiserror::Error;
 use tracing::warn;
 
 pub enum ControlFlow {
@@ -85,4 +89,66 @@ fn filter_capabilities(capabilities: NonEmptyVec<Capability>) -> NonEmptyVec<Cap
         .collect();
 
     NonEmptyVec::try_from(filtered).unwrap_or(NonEmptyVec::from(Capability::Imap4Rev1))
+}
+
+// -------------------------------------------------------------------------------------------------
+
+#[derive(Debug, Error)]
+pub enum IdentityError {
+    #[error("Error processing \"{path}\"")]
+    Io {
+        #[source]
+        source: std::io::Error,
+        path: String,
+    },
+    #[error("Expected 1 key in \"{path}\", found {found}")]
+    UnexpectedKeyCount { path: String, found: usize },
+}
+
+pub(crate) fn load_certificate_chain_pem<P: AsRef<Path>>(
+    path: P,
+) -> Result<Vec<Certificate>, IdentityError> {
+    let display_path = path.as_ref().display().to_string();
+
+    let mut reader = BufReader::new(File::open(path).map_err(|error| IdentityError::Io {
+        source: error,
+        path: display_path.clone(),
+    })?);
+
+    rustls_pemfile::certs(&mut reader)
+        .map(|res| {
+            res.map(|der| Certificate(der.to_vec()))
+                .map_err(|source| IdentityError::Io {
+                    source,
+                    path: display_path.clone(),
+                })
+        })
+        .collect()
+}
+
+pub(crate) fn load_leaf_key_pem<P: AsRef<Path>>(path: P) -> Result<PrivateKey, IdentityError> {
+    let display_path = path.as_ref().display().to_string();
+
+    let mut reader = BufReader::new(File::open(&path).map_err(|source| IdentityError::Io {
+        source,
+        path: display_path.clone(),
+    })?);
+
+    let mut keys = vec![];
+
+    for key in rustls_pemfile::pkcs8_private_keys(&mut reader) {
+        let key = key.map_err(|source| IdentityError::Io {
+            source,
+            path: display_path.clone(),
+        })?;
+        keys.push(PrivateKey(key.secret_pkcs8_der().to_vec()));
+    }
+
+    match keys.len() {
+        1 => Ok(keys.remove(0)),
+        found => Err(IdentityError::UnexpectedKeyCount {
+            path: display_path,
+            found,
+        }),
+    }
 }

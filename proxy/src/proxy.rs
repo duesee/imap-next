@@ -14,13 +14,13 @@ use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{
     rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerName},
-    TlsConnector,
+    TlsAcceptor, TlsConnector,
 };
 use tracing::{error, info, trace};
 
 use crate::{
-    config::Service,
-    util::{self, ControlFlow},
+    config::{Bind, Connect, Identity, Service},
+    util::{self, ControlFlow, IdentityError},
 };
 
 const LITERAL_ACCEPT_TEXT: &str = "proxy: Literal accepted by proxy";
@@ -31,6 +31,10 @@ const COMMAND_REJECTED_TEXT: &str = "proxy: Command rejected by server";
 pub enum ProxyError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Identity(#[from] IdentityError),
+    #[error(transparent)]
+    Tls(#[from] rustls::Error),
 }
 
 pub trait State: Send + 'static {}
@@ -49,7 +53,7 @@ impl State for BoundState {}
 impl Proxy<BoundState> {
     pub async fn bind(service: Service) -> Result<Self, ProxyError> {
         // Accept arbitrary number of connections.
-        let bind_addr_port = format!("{}:{}", service.bind.host, service.bind.port);
+        let bind_addr_port = service.bind.addr_port();
         let listener = TcpListener::bind(&bind_addr_port).await?;
         info!(?bind_addr_port, "Bound to");
 
@@ -63,11 +67,44 @@ impl Proxy<BoundState> {
         let (client_to_proxy, client_addr) = self.state.listener.accept().await?;
         info!(?client_addr, "Accepted client");
 
+        let client_to_proxy = match &self.service.bind {
+            Bind::Tls { identity, .. } => {
+                let config = {
+                    let (certificate_chain, leaf_key) = match identity {
+                        Identity::CertificateChainAndLeafKey {
+                            certificate_chain_path,
+                            leaf_key_path,
+                        } => {
+                            let certificate_chain =
+                                util::load_certificate_chain_pem(certificate_chain_path)?;
+                            let leaf_key = util::load_leaf_key_pem(leaf_key_path)?;
+
+                            (certificate_chain, leaf_key)
+                        }
+                    };
+
+                    // XXX: Support OCSP stapling?
+                    rustls::ServerConfig::builder()
+                        .with_safe_defaults()
+                        .with_no_client_auth()
+                        // Note: The name is misleading. We provide the full chain here.
+                        .with_single_cert(certificate_chain, leaf_key)?
+                };
+
+                // TODO: The acceptor should really be part of the proxy initialization.
+                //       However, for testing purposes, it's nice to create it on-the-fly.
+                let acceptor = TlsAcceptor::from(Arc::new(config));
+
+                AnyStream::new(acceptor.accept(client_to_proxy).await?)
+            }
+            Bind::Insecure { .. } => AnyStream::new(client_to_proxy),
+        };
+
         Ok(Proxy {
             service: self.service.clone(),
             state: ClientAcceptedState {
                 client_addr,
-                client_to_proxy: AnyStream::new(client_to_proxy),
+                client_to_proxy,
             },
         })
     }
@@ -86,13 +123,12 @@ impl Proxy<ClientAcceptedState> {
     }
 
     pub async fn connect_to_server(self) -> Result<Proxy<ConnectedState>, ProxyError> {
-        let server_addr = &self.service.connect.host;
-        let server_port = &self.service.connect.port;
-        let server_addr_port = format!("{server_addr}:{server_port}");
+        let server_addr_port = self.service.connect.addr_port();
+        info!(%server_addr_port, "Connecting to server");
+        let stream_to_server = TcpStream::connect(&server_addr_port).await?;
 
-        info!(?server_addr_port, "Connecting to server");
-        let proxy_to_server = match TcpStream::connect(&server_addr_port).await {
-            Ok(stream_to_server) => {
+        let proxy_to_server = match self.service.connect {
+            Connect::Tls { ref host, .. } => {
                 let config = {
                     let root_store = {
                         let mut root_store = RootCertStore::empty();
@@ -122,23 +158,21 @@ impl Proxy<ClientAcceptedState> {
                 };
 
                 let connector = TlsConnector::from(Arc::new(config));
-                let dnsname = ServerName::try_from(server_addr.as_str()).unwrap();
+                let dnsname = ServerName::try_from(host.as_str()).unwrap();
 
                 info!(?server_addr_port, "Starting TLS with server");
-                connector.connect(dnsname, stream_to_server).await.unwrap()
+                AnyStream::new(connector.connect(dnsname, stream_to_server).await.unwrap())
             }
-            Err(err) => {
-                error!(%err, "Failed to connect to server");
-                return Err(err.into());
-            }
+            Connect::Insecure { .. } => AnyStream::new(stream_to_server),
         };
+
         info!(?server_addr_port, "Connected to server");
 
         Ok(Proxy {
             service: self.service,
             state: ConnectedState {
                 client_to_proxy: self.state.client_to_proxy,
-                proxy_to_server: AnyStream::new(proxy_to_server),
+                proxy_to_server,
             },
         })
     }

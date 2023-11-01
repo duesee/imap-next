@@ -53,16 +53,20 @@ RUST_LOG=proxy=trace cargo run
 
 ## Config
 
-The config consists of multiple "services", and each service looks roughly like this:
+Have a look at the `configs` folder for different scenarios.
+
+You can start multiple services using TOML's [array of tables](https://toml.io/en/v1.0.0#array-of-tables) syntax:
 
 ```toml
 [[services]]
-name = "A user-defined name"
-bind = { host = "127.0.0.1", port = 1143, security = "Insecure" }
-connect = { host = "imap.example.org", port = 993 }
+# ...
+
+[[services]]
+# ...
 ```
 
-The `security` field configures TLS. `Insecure` disables TLS encryption and SHOULD NOT be used when proxying to a remote server.
+The `encryption` field configures transport encryption, i.e., `Insecure` or `Tls`.
+`Insecure` disables TLS encryption and SHOULD NOT be used when proxying to a remote server.
 
 ## Features
 

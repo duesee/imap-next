@@ -1,5 +1,5 @@
 [[services]]
-name = "My Email Provider"
+name = "Insecure/TLS"
 
 [services.bind]
 encryption = "Insecure"
@@ -8,5 +8,5 @@ port = 1143
 
 [services.connect]
 encryption = "Tls"
-host = "imap.example.org"
+host = "127.0.0.1"
 port = 993
