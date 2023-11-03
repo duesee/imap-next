@@ -105,7 +105,7 @@ pub enum IdentityError {
     UnexpectedKeyCount { path: String, found: usize },
 }
 
-pub(crate) fn load_certificate_chain_pem<P: AsRef<Path>>(
+pub fn load_certificate_chain_pem<P: AsRef<Path>>(
     path: P,
 ) -> Result<Vec<Certificate>, IdentityError> {
     let display_path = path.as_ref().display().to_string();
@@ -126,7 +126,7 @@ pub(crate) fn load_certificate_chain_pem<P: AsRef<Path>>(
         .collect()
 }
 
-pub(crate) fn load_leaf_key_pem<P: AsRef<Path>>(path: P) -> Result<PrivateKey, IdentityError> {
+pub fn load_leaf_key_pem<P: AsRef<Path>>(path: P) -> Result<PrivateKey, IdentityError> {
     let display_path = path.as_ref().display().to_string();
 
     let mut reader = BufReader::new(File::open(&path).map_err(|source| IdentityError::Io {

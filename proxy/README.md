@@ -53,9 +53,10 @@ RUST_LOG=proxy=trace cargo run
 
 ## Config
 
-Have a look at the `configs` folder for different scenarios.
+Have a look at the `config.toml` file for different scenarios.
+The first scenario "Insecure to TLS" is useful for a (local) forwarding proxy and is already enabled.
 
-You can start multiple services using TOML's [array of tables](https://toml.io/en/v1.0.0#array-of-tables) syntax:
+Note that you can start multiple services using TOML's [array of tables](https://toml.io/en/v1.0.0#array-of-tables) syntax:
 
 ```toml
 [[services]]

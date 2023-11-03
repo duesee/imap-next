@@ -83,7 +83,6 @@ impl Proxy<BoundState> {
                         }
                     };
 
-                    // XXX: Support OCSP stapling?
                     rustls::ServerConfig::builder()
                         .with_safe_defaults()
                         .with_no_client_auth()
