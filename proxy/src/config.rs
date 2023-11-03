@@ -165,100 +165,71 @@ mod tests {
 
     #[test]
     fn test_config() {
-        let tests = [
-            (
-                Config {
-                    services: vec![Service {
-                        name: "My Email Provider".into(),
-                        bind: Bind::Insecure {
-                            host: "127.0.0.1".into(),
-                            port: 1143,
-                        },
-                        connect: Connect::Tls {
-                            host: "imap.example.org".into(),
-                            port: 993,
-                        },
-                    }],
-                },
-                "config.toml",
-            ),
-            (
-                Config {
-                    services: vec![Service {
-                        name: "Insecure/Insecure".into(),
-                        bind: Bind::Insecure {
-                            host: "127.0.0.1".into(),
-                            port: 1143,
-                        },
-                        connect: Connect::Insecure {
-                            host: "127.0.0.1".into(),
-                            port: 143,
-                        },
-                    }],
-                },
-                "configs/insecure_insecure.toml",
-            ),
-            (
-                Config {
-                    services: vec![Service {
-                        name: "Insecure/TLS".into(),
-                        bind: Bind::Insecure {
-                            host: "127.0.0.1".into(),
-                            port: 1143,
-                        },
-                        connect: Connect::Tls {
-                            host: "127.0.0.1".into(),
-                            port: 993,
-                        },
-                    }],
-                },
-                "configs/insecure_tls.toml",
-            ),
-            (
-                Config {
-                    services: vec![Service {
-                        name: "TLS/Insecure".into(),
-                        bind: Bind::Tls {
-                            host: "127.0.0.1".into(),
-                            port: 1993,
-                            identity: Identity::CertificateChainAndLeafKey {
-                                certificate_chain_path: "localhost.pem".into(),
-                                leaf_key_path: "localhost-key.pem".into(),
-                            },
-                        },
-                        connect: Connect::Insecure {
-                            host: "127.0.0.1".into(),
-                            port: 143,
-                        },
-                    }],
-                },
-                "configs/tls_insecure.toml",
-            ),
-            (
-                Config {
-                    services: vec![Service {
-                        name: "TLS/TLS".into(),
-                        bind: Bind::Tls {
-                            host: "127.0.0.1".into(),
-                            port: 1993,
-                            identity: Identity::CertificateChainAndLeafKey {
-                                certificate_chain_path: "localhost.pem".into(),
-                                leaf_key_path: "localhost-key.pem".into(),
-                            },
-                        },
-                        connect: Connect::Tls {
-                            host: "127.0.0.1".into(),
-                            port: 993,
-                        },
-                    }],
-                },
-                "configs/tls_tls.toml",
-            ),
-        ];
+        // Note: The `config.toml` is written in a way so
+        //       that we can easily include the commented-out services and avoid duplication.
+        let file = std::fs::read_to_string("config.toml")
+            .unwrap()
+            .replace("\n# ", "\n");
 
-        for (expected, path) in tests.into_iter() {
-            let got = Config::load(path).unwrap();
-            assert_eq!(expected, got);
-        }
+        let expected = Config {
+            services: vec![
+                Service {
+                    name: "Insecure to TLS".into(),
+                    bind: Bind::Insecure {
+                        host: "127.0.0.1".into(),
+                        port: 1143,
+                    },
+                    connect: Connect::Tls {
+                        host: "127.0.0.1".into(),
+                        port: 993,
+                    },
+                },
+                Service {
+                    name: "TLS to TLS".into(),
+                    bind: Bind::Tls {
+                        host: "127.0.0.1".into(),
+                        port: 2993,
+                        identity: Identity::CertificateChainAndLeafKey {
+                            certificate_chain_path: "localhost.pem".into(),
+                            leaf_key_path: "localhost-key.pem".into(),
+                        },
+                    },
+                    connect: Connect::Tls {
+                        host: "127.0.0.1".into(),
+                        port: 993,
+                    },
+                },
+                Service {
+                    name: "Insecure to Insecure".into(),
+                    bind: Bind::Insecure {
+                        host: "127.0.0.1".into(),
+                        port: 3143,
+                    },
+                    connect: Connect::Insecure {
+                        host: "127.0.0.1".into(),
+                        port: 143,
+                    },
+                },
+                Service {
+                    name: "TLS to Insecure".into(),
+                    bind: Bind::Tls {
+                        host: "127.0.0.1".into(),
+                        port: 4993,
+                        identity: Identity::CertificateChainAndLeafKey {
+                            certificate_chain_path: "localhost.pem".into(),
+                            leaf_key_path: "localhost-key.pem".into(),
+                        },
+                    },
+                    connect: Connect::Insecure {
+                        host: "127.0.0.1".into(),
+                        port: 143,
+                    },
+                },
+            ],
+        };
+
+        let got = toml::from_str(&file).unwrap();
+
+        assert_eq!(expected, got);
     }
 }

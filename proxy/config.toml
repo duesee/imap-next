@@ -1,6 +1,6 @@
-# Service 1
-#
-# Useful as (local) forward proxy. Don't use as reverse proxy as incoming connections arn't encrypted.
+# # Service 1
+# #
+# # Useful as (local) forward proxy. Don't use as reverse proxy as incoming connections arn't encrypted.
 [[services]]
 name = "Insecure to TLS"
 bind = { encryption = "Insecure", host = "127.0.0.1", port = 1143 }
