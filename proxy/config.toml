@@ -1,5 +1,60 @@
+# # Service 1
+# #
+# # Useful as (local) forward proxy. Don't use as reverse proxy as incoming connections arn't encrypted.
 [[services]]
-name = "Just an example"
-bind = { host = "127.0.0.1", port = 1143, security = "Insecure" }
-connect = { host = "imap.example.org", port = 993 }
+name = "Insecure to TLS"
+bind = { encryption = "Insecure", host = "127.0.0.1", port = 1143 }
+connect = { encryption = "Tls", host = "127.0.0.1", port = 993 }
 
+
+# # Service 2
+# #
+# # Uses TLS for incoming and outgoing connections. (Requires a valid X.509 cerificate.)
+# [[services]]
+# name = "TLS to TLS"
+#
+# [services.bind]
+# encryption = "Tls"
+# host = "127.0.0.1"
+# port = 2993
+#
+# [services.bind.identity]
+# type = "CertificateChainAndLeafKey"
+# certificate_chain_path = "localhost.pem"
+# leaf_key_path = "localhost-key.pem"
+#
+# [services.connect]
+# encryption = "Tls"
+# host = "127.0.0.1"
+# port = 993
+
+
+# # Service 3
+# #
+# # You will know when you need this. You probably don't.
+# [[services]]
+# name = "Insecure to Insecure"
+# bind = { encryption = "Insecure", host = "127.0.0.1", port = 3143 }
+# connect = { encryption = "Insecure", host = "127.0.0.1", port = 143 }
+
+
+# # Service 4
+# #
+# # You will know when you need this. You probably don't.
+# [[services]]
+# name = "TLS to Insecure"
+#
+# [services.bind]
+# encryption = "Tls"
+# host = "127.0.0.1"
+# port = 4993
+#
+# [services.bind.identity]
+# type = "CertificateChainAndLeafKey"
+# certificate_chain_path = "localhost.pem"
+# leaf_key_path = "localhost-key.pem"
+#
+# [services.connect]
+# encryption = "Insecure"
+# host = "127.0.0.1"
+# port = 143

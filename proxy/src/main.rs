@@ -61,7 +61,7 @@ async fn handle_service(service: Service) {
         Ok(proxy) => proxy,
         Err(error) => {
             error!(?error, "Failed to start service");
-            return ();
+            return;
         }
     };
 
