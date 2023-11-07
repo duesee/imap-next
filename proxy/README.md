@@ -7,7 +7,7 @@ It should™ forward all messages *without changing their semantics*. (See note 
 Still, ...
 
 > [!WARNING]
-> **Don't use in production yet!**
+> **Don't use in production (yet)!**
 
 ## Overview
 
@@ -22,12 +22,18 @@ graph LR;
 ```
 
 > [!NOTE]
-> IMAP is a malleable protocol that allows sending commands "piece-by-piece" using "literals".
-> We generally don't preserve semantically irrelevant information such as casing or optional braces.
-> Further, we abstract literal handling to make the proxy more helpful.
-> Essentially, the proxy presents messages "in one piece", meaning they can be easily exchanged (if so desired).
-> Still, the literal abstraction introduces a (minor) semantic change.
-> While this could be rectified in the future, it should be mostly irrelevant in practice.
+> A few semantic changes are required to make the proxy more useful.
+> These changes are communicated by the proxy, e.g., by emitting a warning or prefixing a `text`.
+>
+> **Literal handling** IMAP allows sending commands "piece-by-piece" using literals.
+> However, forwarding single pieces rules out modifications that change the size of a literal.
+> Thus, the proxy collects all pieces first and presents single messages that can be easily replaced (if so desired).
+>
+> **Capability stripping** Capabilities can introduce fundamental protocol changes.
+> Thus, forwarding unknown capabilities would mean we are willing to "lose track" of our session understanding.
+> It also implies the proxy needs to forward unparsed messages and (somehow) "get on track" at some later point.
+> Doing so requires an in-depth analysis of the problem and its implications.
+> Thus, we prefer to strip unsupported capabilities and error out on parsing errors.
 
 # Quickstart
 
@@ -93,9 +99,15 @@ This could be done by fleshing out the proxy into a configurable framework.
 
 Examples:
 
-* `XOAUTH2` could transparently be added to non-supporting clients
-* Support for "capabilities in greetings" or `LITERAL+` could be transparently added to improve performance
-* Encryption could be transparently added such that emails are always appended in encrypted form and decrypted during fetching
-* Vintage clients could use the proxy as a TLS gateway
-* Messages could be forwarded to other software for analysis
-* Protocol traces could be automatically analyzed for supported features
+* Support
+  * `XOAUTH2` could transparently be added to non-supporting clients
+* Security
+    * Encryption could be transparently added such that emails are always appended in encrypted form and decrypted during fetching
+* Support & Security
+  * Vintage clients could use the proxy as a TLS/Compatibility gateway (See ["Using modern email on vintage clients"](https://julienblanchard.com/articles/modern-email-and-vintage-clients).)
+* Performance
+  * Support for "capabilities in greetings" or `LITERAL+` could be transparently added to improve performance
+* Testing
+  * Messages could be forwarded to other software for analysis
+  * Protocol traces could be automatically analyzed for supported features
+  * Proxy could inject non-semantic changes to expose interoperability issues (See issue #62.)
