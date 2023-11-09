@@ -1,10 +1,8 @@
-use bounded_static::ToBoundedStatic;
 use bytes::BytesMut;
 use imap_codec::{
     decode::{GreetingDecodeError, ResponseDecodeError},
     imap_types::{
         command::Command,
-        core::Tag,
         response::{Data, Greeting, Response, Status, StatusBody, StatusKind, Tagged},
     },
     CommandCodec, GreetingCodec, ResponseCodec,
@@ -36,7 +34,7 @@ pub struct ClientFlow {
     stream: AnyStream,
 
     next_command_handle: ClientFlowCommandHandle,
-    send_command_state: SendCommandState<(Tag<'static>, ClientFlowCommandHandle)>,
+    send_command_state: SendCommandState<ClientFlowCommandHandle>,
     receive_response_state: ReceiveState<ResponseCodec>,
 }
 
@@ -87,12 +85,11 @@ impl ClientFlow {
     /// The [`Command`] is not sent immediately but during one of the next calls of
     /// [`ClientFlow::progress`]. All [`Command`]s are sent in the same order they have been
     /// enqueued.
-    pub fn enqueue_command(&mut self, command: Command<'_>) -> ClientFlowCommandHandle {
+    pub fn enqueue_command(&mut self, command: Command<'static>) -> ClientFlowCommandHandle {
         // TODO(#53)
         let handle = self.next_command_handle;
         self.next_command_handle = ClientFlowCommandHandle(handle.0 + 1);
-        let tag = command.tag.to_static();
-        self.send_command_state.enqueue((tag, handle), command);
+        self.send_command_state.enqueue(handle, command);
         handle
     }
 
@@ -110,7 +107,7 @@ impl ClientFlow {
 
     async fn progress_command(&mut self) -> Result<Option<ClientFlowEvent>, ClientFlowError> {
         match self.send_command_state.progress(&mut self.stream).await? {
-            Some((tag, handle)) => Ok(Some(ClientFlowEvent::CommandSent { handle, tag })),
+            Some((handle, command)) => Ok(Some(ClientFlowEvent::CommandSent { handle, command })),
             None => Ok(None),
         }
     }
@@ -145,10 +142,10 @@ impl ClientFlow {
 
             match response {
                 Response::Status(status) => {
-                    if let Some((tag, handle)) = self.maybe_abort_command(&status) {
+                    if let Some((handle, command)) = self.maybe_abort_command(&status) {
                         break Some(ClientFlowEvent::CommandRejected {
                             handle,
-                            tag,
+                            command,
                             status,
                         });
                     } else {
@@ -169,15 +166,15 @@ impl ClientFlow {
     fn maybe_abort_command(
         &mut self,
         status: &Status,
-    ) -> Option<(Tag<'static>, ClientFlowCommandHandle)> {
-        let (command_tag, _) = self.send_command_state.command_in_progress()?;
+    ) -> Option<(ClientFlowCommandHandle, Command<'static>)> {
+        let command = self.send_command_state.command_in_progress()?;
 
         match status {
             Status::Tagged(Tagged {
                 tag,
                 body: StatusBody { kind, .. },
                 ..
-            }) if *kind == StatusKind::Bad && tag == command_tag => {
+            }) if *kind == StatusKind::Bad && tag == &command.tag => {
                 self.send_command_state.abort_command()
             }
             _ => None,
@@ -200,15 +197,15 @@ pub enum ClientFlowEvent {
     CommandSent {
         /// The handle of the enqueued [`Command`].
         handle: ClientFlowCommandHandle,
-        /// The [`Tag`] of the enqueued [`Command`].
-        tag: Tag<'static>,
+        /// [`Command`] that was enqueued and is now sent.
+        command: Command<'static>,
     },
     /// The enqueued [`Command`] wasn't sent completely because the server rejected it.
     CommandRejected {
         /// The handle of the enqueued [`Command`].
         handle: ClientFlowCommandHandle,
-        /// The [`Tag`] of the enqueued [`Command`].
-        tag: Tag<'static>,
+        /// [`Command`] that was enqueued and was rejected.
+        command: Command<'static>,
         /// The [`Status`] sent by the server in order to reject the [`Command`].
         /// [`ClientFlow`] has already handled this [`Status`] but it might still have
         /// useful information that could be logged or displayed to the user

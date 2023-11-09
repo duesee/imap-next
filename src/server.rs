@@ -56,14 +56,18 @@ impl ServerFlow {
     pub async fn send_greeting(
         mut stream: AnyStream,
         options: ServerFlowOptions,
-        greeting: Greeting<'_>,
-    ) -> Result<Self, ServerFlowError> {
+        greeting: Greeting<'static>,
+    ) -> Result<(Self, Greeting<'static>), ServerFlowError> {
         // Send greeting
         let write_buffer = BytesMut::new();
         let mut send_greeting_state =
             SendResponseState::new(GreetingCodec::default(), write_buffer);
         send_greeting_state.enqueue((), greeting);
-        while let Some(()) = send_greeting_state.progress(&mut stream).await? {}
+        let greeting = loop {
+            if let Some(((), greeting)) = send_greeting_state.progress(&mut stream).await? {
+                break greeting;
+            }
+        };
 
         // Successfully sent greeting, construct instance
         let write_buffer = send_greeting_state.finish();
@@ -81,7 +85,7 @@ impl ServerFlow {
             literal_reject_text: options.literal_reject_text,
         };
 
-        Ok(server_flow)
+        Ok((server_flow, greeting))
     }
 
     /// Enqueues the [`Data`] response for being sent to the client.
@@ -89,7 +93,7 @@ impl ServerFlow {
     /// The response is not sent immediately but during one of the next calls of
     /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
     /// enqueued.
-    pub fn enqueue_data(&mut self, data: Data<'_>) -> ServerFlowResponseHandle {
+    pub fn enqueue_data(&mut self, data: Data<'static>) -> ServerFlowResponseHandle {
         let handle = self.next_response_handle();
         self.send_response_state
             .enqueue(Some(handle), Response::Data(data));
@@ -101,7 +105,7 @@ impl ServerFlow {
     /// The response is not sent immediately but during one of the next calls of
     /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
     /// enqueued.
-    pub fn enqueue_status(&mut self, status: Status<'_>) -> ServerFlowResponseHandle {
+    pub fn enqueue_status(&mut self, status: Status<'static>) -> ServerFlowResponseHandle {
         let handle = self.next_response_handle();
         self.send_response_state
             .enqueue(Some(handle), Response::Status(status));
@@ -128,8 +132,18 @@ impl ServerFlow {
 
     async fn progress_response(&mut self) -> Result<Option<ServerFlowEvent>, ServerFlowError> {
         match self.send_response_state.progress(&mut self.stream).await? {
-            Some(Some(handle)) => Ok(Some(ServerFlowEvent::ResponseSent { handle })),
-            _ => Ok(None),
+            Some((Some(handle), response)) => {
+                // A response was sucessfully sent, inform the caller
+                Ok(Some(ServerFlowEvent::ResponseSent { handle, response }))
+            }
+            Some((None, _)) => {
+                // An internally created response was sent, don't inform the caller
+                Ok(None)
+            }
+            _ => {
+                // No progress yet
+                Ok(None)
+            }
         }
     }
 
@@ -202,6 +216,8 @@ pub enum ServerFlowEvent {
     ResponseSent {
         /// The handle of the enqueued [`Response`].
         handle: ServerFlowResponseHandle,
+        /// [`Response`] that was enqueued and is now sent.
+        response: Response<'static>,
     },
     CommandReceived {
         command: Command<'static>,
