@@ -19,7 +19,7 @@ Notably, we have the `proxy`, `tasks`, and `tag-generator` workspace members.
 * `proxy` is an already usable (but still not production-ready) IMAP proxy.
   It gracefully forwards unsolicited responses, abstracts away literal processing, and `Debug`-prints messages.
   Proxies are great for challenging the usability of a library, and we use them to validate our design decisions.
-  (See [./proxy/README.md].)
+  (See the [README](./proxy/README.md).)
 * `tasks` is our prototype of a higher-level IMAP library that abstracts away command and response handling into `Task`s.
   This crate will eventually become what a client or server implementor should use to get IMAP right.
   Currently, only the client side is implemented.
