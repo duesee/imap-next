@@ -3,15 +3,18 @@ use bytes::BytesMut;
 use imap_codec::{
     decode::{GreetingDecodeError, ResponseDecodeError},
     imap_types::{
-        command::Command,
+        auth::{AuthMechanism, AuthenticateData},
+        command::{Command, CommandBody},
         core::Tag,
         response::{Data, Greeting, Response, Status, StatusBody, StatusKind, Tagged},
+        secret::Secret,
     },
     CommandCodec, GreetingCodec, ResponseCodec,
 };
 use thiserror::Error;
 
 use crate::{
+    auth::Authenticate,
     receive::{ReceiveEvent, ReceiveState},
     send::SendCommandState,
     stream::AnyStream,
@@ -93,6 +96,40 @@ impl ClientFlow {
         self.next_command_handle = ClientFlowCommandHandle(handle.0 + 1);
         let tag = command.tag.to_static();
         self.send_command_state.enqueue((tag, handle), command);
+        handle
+    }
+
+    pub fn enqueue_command_authenticate(
+        &mut self,
+        tag: Tag<'static>,
+        auth: Authenticate,
+    ) -> ClientFlowCommandHandle {
+        // TODO(#53)
+        let handle = self.next_command_handle;
+        self.next_command_handle = ClientFlowCommandHandle(handle.0 + 1);
+
+        let (cmd, data) = match auth {
+            Authenticate::Plain { username, password } => {
+                // SASL PLAIN has the following form:
+                //     base64(b"<authorization identity>\x00<authentication identity>\x00<password>")
+                // We don't use `<authorization identity>` (yet).
+                let mut data: Vec<u8> = vec![0x00];
+                data.extend_from_slice(&username);
+                data.push(0x00);
+                data.extend_from_slice(password.declassify());
+
+                (
+                    Command {
+                        tag: tag.clone(),
+                        body: CommandBody::authenticate(AuthMechanism::Plain),
+                    },
+                    AuthenticateData(Secret::new(data)),
+                )
+            }
+        };
+
+        self.send_command_state
+            .enqueue_authenticate((tag, handle), cmd, data);
         handle
     }
 

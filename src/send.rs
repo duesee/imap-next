@@ -3,8 +3,8 @@ use std::collections::VecDeque;
 use bytes::BytesMut;
 use imap_codec::{
     encode::{Encoder, Fragment},
-    imap_types::command::Command,
-    CommandCodec,
+    imap_types::{auth::AuthenticateData, command::Command},
+    AuthenticateDataCodec, CommandCodec,
 };
 use tokio::io::AsyncWriteExt;
 
@@ -34,6 +34,15 @@ impl<K> SendCommandState<K> {
 
     pub fn enqueue(&mut self, key: K, command: Command<'_>) {
         let fragments = self.codec.encode(&command).collect();
+        let entry = SendCommandQueueEntry { key, fragments };
+        self.send_queue.push_back(entry);
+    }
+
+    pub fn enqueue_authenticate(&mut self, key: K, command: Command<'_>, data: AuthenticateData) {
+        let mut fragments: VecDeque<_> = self.codec.encode(&command).collect();
+        let fragments_auth = AuthenticateDataCodec::new().encode(&data);
+        fragments.extend(fragments_auth);
+
         let entry = SendCommandQueueEntry { key, fragments };
         self.send_queue.push_back(entry);
     }
@@ -122,8 +131,13 @@ impl<K> SendCommandState<K> {
                         });
                         break true;
                     }
-                    Fragment::AuthData { .. } => {
-                        unimplemented!()
+                    Fragment::AuthData { data } => {
+                        // Delay authentication data until `Continue` from server
+                        progress.next_literal = Some(SendCommandLiteralProgress {
+                            data,
+                            received_continue: false,
+                        });
+                        break true;
                     }
                 }
             } else {
