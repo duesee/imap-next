@@ -8,7 +8,7 @@ use std::{
 use imap_codec::imap_types::{
     command::{Command, CommandBody},
     core::Tag,
-    response::{Bye, Data, Response, Status, StatusBody, StatusV2, Tagged},
+    response::{Bye, Data, Response, Status, StatusBody, Tagged},
 };
 use imap_flow::client::{ClientFlow, ClientFlowCommandHandle, ClientFlowError, ClientFlowEvent};
 use tag_generator::TagGenerator;
@@ -111,8 +111,8 @@ impl Scheduler {
                     self.active_tasks.insert(handle, (tag, entry));
                 }
                 ClientFlowEvent::CommandRejected { handle, status, .. } => {
-                    let body = match StatusV2::from(status) {
-                        StatusV2::Tagged(Tagged { body, .. }) => body,
+                    let body = match status {
+                        Status::Tagged(Tagged { body, .. }) => body,
                         _ => unreachable!(),
                     };
 
@@ -130,30 +130,30 @@ impl Scheduler {
                         return Ok(SchedulerEvent::Unsolicited(Response::Data(data)));
                     }
                 }
-                ClientFlowEvent::StatusReceived { status } => match StatusV2::from(status) {
-                    StatusV2::Untagged(body) => {
+                ClientFlowEvent::StatusReceived { status } => match status {
+                    Status::Untagged(body) => {
                         if let Some(body) =
                             trickle_down(body, self.active_tasks_mut(), |task, body| {
                                 task.process_untagged(body)
                             })
                         {
                             return Ok(SchedulerEvent::Unsolicited(Response::Status(
-                                Status::from(StatusV2::Untagged(body)),
+                                Status::Untagged(body),
                             )));
                         }
                     }
-                    StatusV2::Bye(bye) => {
+                    Status::Bye(bye) => {
                         if let Some(bye) =
                             trickle_down(bye, self.active_tasks_mut(), |task, bye| {
                                 task.process_bye(bye)
                             })
                         {
-                            return Ok(SchedulerEvent::Unsolicited(Response::Status(
-                                Status::from(StatusV2::Bye(bye)),
-                            )));
+                            return Ok(SchedulerEvent::Unsolicited(Response::Status(Status::Bye(
+                                bye,
+                            ))));
                         }
                     }
-                    StatusV2::Tagged(Tagged { tag, body }) => {
+                    Status::Tagged(Tagged { tag, body }) => {
                         let handle = {
                             if let Some((handle, _)) =
                                 self.active_tasks.iter().find(|(_, (tag_, _))| tag == *tag_)
