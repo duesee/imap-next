@@ -324,19 +324,11 @@ fn handle_server_event(
             let status = match status.code() {
                 Some(Code::Alert) => {
                     // Keep the alert message because it MUST be displayed to the user
-                    Status::Bad {
-                        tag: Some(tag),
-                        code: Some(Code::Alert),
-                        text: status.text().clone(),
-                    }
+                    Status::bad(Some(tag), Some(Code::Alert), status.text().clone()).unwrap()
                 }
                 _ => {
                     // Use generic message because the original code and text might be misleading
-                    Status::Bad {
-                        tag: Some(tag),
-                        code: None,
-                        text: Text::try_from(COMMAND_REJECTED_TEXT).unwrap(),
-                    }
+                    Status::bad(Some(tag), None, COMMAND_REJECTED_TEXT).unwrap()
                 }
             };
             let _handle = client_to_proxy.enqueue_status(status);

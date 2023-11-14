@@ -122,6 +122,9 @@ impl<K> SendCommandState<K> {
                         });
                         break true;
                     }
+                    Fragment::AuthData { .. } => {
+                        unimplemented!()
+                    }
                 }
             } else {
                 break false;
@@ -218,6 +221,7 @@ impl<C: Encoder, K> SendResponseState<C, K> {
                         Fragment::Line { data } => data,
                         // TODO: Handle `LITERAL{+,-}`.
                         Fragment::Literal { data, mode: _mode } => data,
+                        Fragment::AuthData { data } => data,
                     };
                     self.write_buffer.extend(data);
                 }

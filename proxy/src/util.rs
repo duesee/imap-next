@@ -2,7 +2,7 @@ use std::{fs::File, io::BufReader, path::Path};
 
 use imap_codec::imap_types::{
     core::NonEmptyVec,
-    response::{Capability, Code, Data, Greeting, Status},
+    response::{Bye, Capability, Code, Data, Greeting, Status, StatusBody, Tagged},
 };
 use rustls::{Certificate, PrivateKey};
 use thiserror::Error;
@@ -47,22 +47,22 @@ pub fn filter_capabilities_in_data(data: &mut Data) {
 
 // Remove unsupported capabilities in a status' `Code::Capability`.
 pub fn filter_capabilities_in_status(status: &mut Status) {
-    if let Status::Ok {
+    if let Status::Tagged(Tagged {
+        body:
+            StatusBody {
+                code: Some(Code::Capability(capabilities)),
+                ..
+            },
+        ..
+    })
+    | Status::Untagged(StatusBody {
         code: Some(Code::Capability(capabilities)),
         ..
-    }
-    | Status::No {
+    })
+    | Status::Bye(Bye {
         code: Some(Code::Capability(capabilities)),
         ..
-    }
-    | Status::Bad {
-        code: Some(Code::Capability(capabilities)),
-        ..
-    }
-    | Status::Bye {
-        code: Some(Code::Capability(capabilities)),
-        ..
-    } = status
+    }) = status
     {
         let filtered = filter_capabilities(capabilities.clone());
 

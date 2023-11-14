@@ -5,7 +5,7 @@ use imap_codec::{
     imap_types::{
         command::Command,
         core::Tag,
-        response::{Data, Greeting, Response, Status},
+        response::{Data, Greeting, Response, Status, StatusBody, StatusKind, Tagged},
     },
     CommandCodec, GreetingCodec, ResponseCodec,
 };
@@ -173,10 +173,13 @@ impl ClientFlow {
         let (command_tag, _) = self.send_command_state.command_in_progress()?;
 
         match status {
-            Status::Bad {
-                tag: Some(status_tag),
+            Status::Tagged(Tagged {
+                tag,
+                body: StatusBody { kind, .. },
                 ..
-            } if status_tag == command_tag => self.send_command_state.abort_command(),
+            }) if *kind == StatusKind::Bad && tag == command_tag => {
+                self.send_command_state.abort_command()
+            }
             _ => None,
         }
     }
