@@ -88,6 +88,7 @@ impl ClientFlow {
     /// [`ClientFlow::progress`]. All [`Command`]s are sent in the same order they have been
     /// enqueued.
     pub fn enqueue_command(&mut self, command: Command<'_>) -> ClientFlowCommandHandle {
+        // TODO(#53)
         let handle = self.next_command_handle;
         self.next_command_handle = ClientFlowCommandHandle(handle.0 + 1);
         let tag = command.tag.to_static();
