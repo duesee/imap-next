@@ -205,7 +205,7 @@ impl Proxy<ConnectedState> {
 
         util::filter_capabilities_in_greeting(&mut greeting);
 
-        let (mut client_to_proxy, _greeting) = {
+        let (mut client_to_proxy, greeting) = {
             // TODO: Read options from config
             let options = ServerFlowOptions {
                 literal_accept_text: Text::try_from(LITERAL_ACCEPT_TEXT).unwrap(),
@@ -224,7 +224,7 @@ impl Proxy<ConnectedState> {
                 }
             }
         };
-        trace!(role = "p2c", "<--- Forwarded greeting");
+        trace!(role = "p2c", ?greeting, "<--- Forwarded greeting");
 
         loop {
             let control_flow = tokio::select! {
