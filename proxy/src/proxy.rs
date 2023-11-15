@@ -325,7 +325,7 @@ fn handle_server_event(
         } => {
             // TODO: log handle
             trace!(role = "p2s", ?command, ?status, "---> Aborted command");
-            let status: Status<'static> = match status.code() {
+            let status = match status.code() {
                 Some(Code::Alert) => {
                     // Keep the alert message because it MUST be displayed to the user
                     Status::bad(
