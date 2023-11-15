@@ -216,7 +216,7 @@ pub enum ServerFlowEvent {
     ResponseSent {
         /// The handle of the enqueued [`Response`].
         handle: ServerFlowResponseHandle,
-        /// [`Response`] that was enqueued and is now sent.
+        /// Formerly enqueued [`Response`] that was now sent.
         response: Response<'static>,
     },
     CommandReceived {

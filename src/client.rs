@@ -197,14 +197,14 @@ pub enum ClientFlowEvent {
     CommandSent {
         /// The handle of the enqueued [`Command`].
         handle: ClientFlowCommandHandle,
-        /// [`Command`] that was enqueued and is now sent.
+        /// Formerly enqueued [`Command`] that was now sent.
         command: Command<'static>,
     },
     /// The enqueued [`Command`] wasn't sent completely because the server rejected it.
     CommandRejected {
         /// The handle of the enqueued [`Command`].
         handle: ClientFlowCommandHandle,
-        /// [`Command`] that was enqueued and was rejected.
+        /// Formerly enqueued [`Command`] that was now rejected.
         command: Command<'static>,
         /// The [`Status`] sent by the server in order to reject the [`Command`].
         /// [`ClientFlow`] has already handled this [`Status`] but it might still have
