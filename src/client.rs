@@ -46,10 +46,13 @@ impl ClientFlow {
         mut stream: AnyStream,
         options: ClientFlowOptions,
     ) -> Result<(Self, Greeting<'static>), ClientFlowError> {
-        // Receive greeting
-        let read_buffer = BytesMut::new();
-        let mut receive_greeting_state =
-            ReceiveState::new(GreetingCodec::default(), options.crlf_relaxed, read_buffer);
+        // Receive greeting.
+        let mut receive_greeting_state = ReceiveState::new(
+            GreetingCodec::default(),
+            options.crlf_relaxed,
+            BytesMut::new(),
+        );
+
         let greeting = match receive_greeting_state.progress(&mut stream).await? {
             ReceiveEvent::DecodingSuccess(greeting) => {
                 receive_greeting_state.finish_message();
@@ -67,12 +70,16 @@ impl ClientFlow {
             }
         };
 
-        // Successfully received greeting, create instance.
-        let write_buffer = BytesMut::new();
-        let send_command_state = SendCommandState::new(CommandCodec::default(), write_buffer);
-        let read_buffer = receive_greeting_state.finish();
-        let receive_response_state =
-            ReceiveState::new(ResponseCodec::new(), options.crlf_relaxed, read_buffer);
+        // Create state to send commands ...
+        let send_command_state = SendCommandState::new(CommandCodec::default(), BytesMut::new());
+
+        // ..., and state to receive responses.
+        let receive_response_state = ReceiveState::new(
+            ResponseCodec::new(),
+            options.crlf_relaxed,
+            receive_greeting_state.finish(),
+        );
+
         let client_flow = Self {
             stream,
             next_command_handle: ClientFlowCommandHandle(0),
