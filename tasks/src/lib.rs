@@ -105,10 +105,10 @@ impl Scheduler {
             let event = self.flow.progress().await?;
 
             match event {
-                ClientFlowEvent::CommandSent { tag, handle } => {
+                ClientFlowEvent::CommandSent { handle, command } => {
                     // This `unwrap` can't fail because `waiting_tasks` contains all unsent `Commands`.
                     let entry = self.waiting_tasks.remove(&handle).unwrap();
-                    self.active_tasks.insert(handle, (tag, entry));
+                    self.active_tasks.insert(handle, (command.tag, entry));
                 }
                 ClientFlowEvent::CommandRejected { handle, status, .. } => {
                     let body = match status {

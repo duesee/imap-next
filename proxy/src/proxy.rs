@@ -2,6 +2,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use colored::Colorize;
 use imap_codec::imap_types::{
+    bounded_static::ToBoundedStatic,
     core::Text,
     response::{Code, Status},
 };
@@ -204,7 +205,7 @@ impl Proxy<ConnectedState> {
 
         util::filter_capabilities_in_greeting(&mut greeting);
 
-        let mut client_to_proxy = {
+        let (mut client_to_proxy, greeting) = {
             // TODO: Read options from config
             let options = ServerFlowOptions {
                 literal_accept_text: Text::try_from(LITERAL_ACCEPT_TEXT).unwrap(),
@@ -223,7 +224,7 @@ impl Proxy<ConnectedState> {
                 }
             }
         };
-        trace!(role = "p2c", "<--- Forwarded greeting");
+        trace!(role = "p2c", ?greeting, "<--- Forwarded greeting");
 
         loop {
             let control_flow = tokio::select! {
@@ -269,9 +270,12 @@ fn handle_client_event(
     };
 
     match event {
-        ServerFlowEvent::ResponseSent { handle: _handle } => {
+        ServerFlowEvent::ResponseSent {
+            handle: _handle,
+            response,
+        } => {
             // TODO: log handle
-            trace!(role = "p2c", "<--- Forwarded response");
+            trace!(role = "p2c", ?response, "<--- Forwarded response");
         }
         ServerFlowEvent::CommandReceived { command } => {
             trace!(command=%format!("{:?}", command).red(), role = "c2p", "|--> Received command");
@@ -309,26 +313,31 @@ fn handle_server_event(
     match event {
         ClientFlowEvent::CommandSent {
             handle: _handle,
-            tag,
+            command,
         } => {
             // TODO: log handle
-            trace!(role = "p2s", ?tag, "---> Forwarded command");
+            trace!(role = "p2s", ?command, "---> Forwarded command");
         }
         ClientFlowEvent::CommandRejected {
             handle: _handle,
-            tag,
+            command,
             status,
         } => {
             // TODO: log handle
-            trace!(role = "p2s", ?tag, ?status, "---> Aborted command");
+            trace!(role = "p2s", ?command, ?status, "---> Aborted command");
             let status = match status.code() {
                 Some(Code::Alert) => {
                     // Keep the alert message because it MUST be displayed to the user
-                    Status::bad(Some(tag), Some(Code::Alert), status.text().clone()).unwrap()
+                    Status::bad(
+                        Some(command.tag),
+                        Some(Code::Alert),
+                        status.text().to_static(),
+                    )
+                    .unwrap()
                 }
                 _ => {
                     // Use generic message because the original code and text might be misleading
-                    Status::bad(Some(tag), None, COMMAND_REJECTED_TEXT).unwrap()
+                    Status::bad(Some(command.tag), None, COMMAND_REJECTED_TEXT).unwrap()
                 }
             };
             let _handle = client_to_proxy.enqueue_status(status);

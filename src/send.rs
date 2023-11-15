@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, fmt::Debug};
 
 use bytes::BytesMut;
 use imap_codec::{
@@ -32,19 +32,25 @@ impl<K> SendCommandState<K> {
         }
     }
 
-    pub fn enqueue(&mut self, key: K, command: Command<'_>) {
+    pub fn enqueue(&mut self, key: K, command: Command<'static>) {
         let fragments = self.codec.encode(&command).collect();
-        let entry = SendCommandQueueEntry { key, fragments };
+        let entry = SendCommandQueueEntry {
+            key,
+            command,
+            fragments,
+        };
         self.send_queue.push_back(entry);
     }
 
-    pub fn command_in_progress(&self) -> Option<&K> {
-        self.send_progress.as_ref().map(|x| &x.key)
+    pub fn command_in_progress(&self) -> Option<&Command<'static>> {
+        self.send_progress.as_ref().map(|x| &x.command)
     }
 
-    pub fn abort_command(&mut self) -> Option<K> {
+    pub fn abort_command(&mut self) -> Option<(K, Command<'static>)> {
         self.write_buffer.clear();
-        self.send_progress.take().map(|x| x.key)
+        self.send_progress
+            .take()
+            .map(|progress| (progress.key, progress.command))
     }
 
     pub fn continue_command(&mut self) {
@@ -65,7 +71,7 @@ impl<K> SendCommandState<K> {
     pub async fn progress(
         &mut self,
         stream: &mut AnyStream,
-    ) -> Result<Option<K>, tokio::io::Error> {
+    ) -> Result<Option<(K, Command<'static>)>, tokio::io::Error> {
         let progress = match self.send_progress.take() {
             Some(progress) => {
                 // We are currently sending a command to the server. This sending process was
@@ -82,6 +88,7 @@ impl<K> SendCommandState<K> {
                 // Start sending the next command
                 SendCommandProgress {
                     key: entry.key,
+                    command: entry.command,
                     next_literal: None,
                     next_fragments: entry.fragments,
                 }
@@ -138,7 +145,10 @@ impl<K> SendCommandState<K> {
             Ok(None)
         } else {
             // Command was sent completely
-            Ok(self.send_progress.take().map(|progress| progress.key))
+            Ok(self
+                .send_progress
+                .take()
+                .map(|progress| (progress.key, progress.command)))
         }
     }
 }
@@ -146,12 +156,14 @@ impl<K> SendCommandState<K> {
 #[derive(Debug)]
 struct SendCommandQueueEntry<K> {
     key: K,
+    command: Command<'static>,
     fragments: VecDeque<Fragment>,
 }
 
 #[derive(Debug)]
 struct SendCommandProgress<K> {
     key: K,
+    command: Command<'static>,
     // If defined this literal need to be sent before `next_fragments`.
     next_literal: Option<SendCommandLiteralProgress>,
     // The fragments that need to be sent.
@@ -167,30 +179,40 @@ struct SendCommandLiteralProgress {
 }
 
 #[derive(Debug)]
-pub struct SendResponseState<C: Encoder, K> {
+pub struct SendResponseState<C: Encoder, K>
+where
+    C::Message<'static>: Debug,
+{
     codec: C,
     // The responses that should be sent.
-    send_queue: VecDeque<SendResponseQueueEntry<K>>,
-    // Key of the response that is currently being sent.
-    send_in_progress_key: Option<K>,
+    send_queue: VecDeque<SendResponseQueueEntry<C, K>>,
+    // State of the response that is currently being sent.
+    send_progress: Option<SendResponseProgress<C, K>>,
     // Used for writing the current response to the stream.
     // Should be empty if `send_in_progress_key` is `None`.
     write_buffer: BytesMut,
 }
 
-impl<C: Encoder, K> SendResponseState<C, K> {
+impl<C: Encoder, K> SendResponseState<C, K>
+where
+    C::Message<'static>: Debug,
+{
     pub fn new(codec: C, write_buffer: BytesMut) -> Self {
         Self {
             codec,
             send_queue: VecDeque::new(),
-            send_in_progress_key: None,
+            send_progress: None,
             write_buffer,
         }
     }
 
-    pub fn enqueue(&mut self, key: K, response: C::Message<'_>) {
+    pub fn enqueue(&mut self, key: K, response: C::Message<'static>) {
         let fragments = self.codec.encode(&response).collect();
-        let entry = SendResponseQueueEntry { key, fragments };
+        let entry = SendResponseQueueEntry {
+            key,
+            response,
+            fragments,
+        };
         self.send_queue.push_back(entry);
     }
 
@@ -202,12 +224,12 @@ impl<C: Encoder, K> SendResponseState<C, K> {
     pub async fn progress(
         &mut self,
         stream: &mut AnyStream,
-    ) -> Result<Option<K>, tokio::io::Error> {
-        let send_in_progress_key = match self.send_in_progress_key.take() {
-            Some(key) => {
+    ) -> Result<Option<(K, C::Message<'static>)>, tokio::io::Error> {
+        let progress = match self.send_progress.take() {
+            Some(progress) => {
                 // We are currently sending a response. This sending process was
                 // previously aborted because the `Future` was dropped while sending.
-                key
+                progress
             }
             None => {
                 let Some(entry) = self.send_queue.pop_front() else {
@@ -226,21 +248,40 @@ impl<C: Encoder, K> SendResponseState<C, K> {
                     self.write_buffer.extend(data);
                 }
 
-                entry.key
+                SendResponseProgress {
+                    key: entry.key,
+                    response: entry.response,
+                }
             }
         };
-        self.send_in_progress_key = Some(send_in_progress_key);
+        self.send_progress = Some(progress);
 
         // Send all bytes of current response
         stream.0.write_all_buf(&mut self.write_buffer).await?;
 
-        // response was sent completely
-        Ok(self.send_in_progress_key.take())
+        // Response was sent completely
+        Ok(self
+            .send_progress
+            .take()
+            .map(|progress| (progress.key, progress.response)))
     }
 }
 
 #[derive(Debug)]
-struct SendResponseQueueEntry<K> {
+struct SendResponseQueueEntry<C: Encoder, K>
+where
+    C::Message<'static>: Debug,
+{
     key: K,
+    response: C::Message<'static>,
     fragments: Vec<Fragment>,
+}
+
+#[derive(Debug)]
+struct SendResponseProgress<C: Encoder, K>
+where
+    C::Message<'static>: Debug,
+{
+    key: K,
+    response: C::Message<'static>,
 }

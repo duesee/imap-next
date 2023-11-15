@@ -15,7 +15,7 @@ async fn main() {
         stream
     };
 
-    let mut server = ServerFlow::send_greeting(
+    let (mut server, _) = ServerFlow::send_greeting(
         AnyStream::new(stream),
         ServerFlowOptions::default(),
         Greeting::ok(None, "Hello, World!").unwrap(),
@@ -33,8 +33,11 @@ async fn main() {
                     server.enqueue_status(Status::no(Some(command.tag), None, "...").unwrap()),
                 );
             }
-            ServerFlowEvent::ResponseSent { handle: got_handle } => {
-                println!("response sent: {handle:?}");
+            ServerFlowEvent::ResponseSent {
+                handle: got_handle,
+                response,
+            } => {
+                println!("response sent: {response:?}");
                 assert_eq!(handle, Some(got_handle));
             }
         }
