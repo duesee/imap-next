@@ -3,7 +3,10 @@ use std::{collections::VecDeque, fmt::Debug};
 use bytes::BytesMut;
 use imap_codec::{
     encode::{Encoder, Fragment},
-    imap_types::command::Command,
+    imap_types::{
+        command::{Command, CommandBody},
+        core::{LiteralMode, Tag},
+    },
     CommandCodec,
 };
 use tokio::io::AsyncWriteExt;
@@ -38,6 +41,41 @@ impl<K> SendCommandState<K> {
             key,
             command,
             fragments,
+        };
+        self.send_queue.push_back(entry);
+    }
+
+    pub fn enqueue_idle(&mut self, key: K, tag: Tag<'static>) {
+        let command = Command {
+            tag,
+            body: CommandBody::Idle,
+        };
+        let mut fragments: VecDeque<_> = self.codec.encode(&command).collect();
+        fragments.push_back(Fragment::Literal {
+            data: vec![],
+            mode: LiteralMode::Sync,
+        });
+
+        let entry = SendCommandQueueEntry {
+            key,
+            command,
+            fragments,
+        };
+        self.send_queue.push_back(entry);
+    }
+
+    pub fn enqueue_done(&mut self, key: K) {
+        let entry = SendCommandQueueEntry {
+            key,
+            // TODO: ...
+            command: Command {
+                tag: Tag::unvalidated("IMAP_FLOW_FAKE_DONE_TAG"),
+                body: CommandBody::Noop,
+            },
+            fragments: vec![Fragment::Line {
+                data: b"DONE\r\n".to_vec(),
+            }]
+            .into(),
         };
         self.send_queue.push_back(entry);
     }
@@ -151,6 +189,10 @@ impl<K> SendCommandState<K> {
                 .take()
                 .map(|progress| (progress.key, progress.command)))
         }
+    }
+
+    pub(crate) fn clear_send_queue(&mut self) {
+        self.send_queue.clear();
     }
 }
 

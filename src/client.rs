@@ -3,6 +3,7 @@ use imap_codec::{
     decode::{GreetingDecodeError, ResponseDecodeError},
     imap_types::{
         command::Command,
+        core::Tag,
         response::{
             CommandContinuationRequest, Data, Greeting, Response, Status, StatusBody, StatusKind,
             Tagged,
@@ -101,6 +102,23 @@ impl ClientFlow {
         handle
     }
 
+    /// Enqueues the [`Command`] for being sent to the client.
+    ///
+    /// The [`Command`] is not sent immediately but during one of the next calls of
+    /// [`ClientFlow::progress`]. All [`Command`]s are sent in the same order they have been
+    /// enqueued.
+    fn enqueue_idle(&mut self, tag: Tag<'static>) -> ClientFlowCommandHandle {
+        let handle = self.handle_generator.generate();
+        self.send_command_state.enqueue_idle(handle, tag);
+        handle
+    }
+
+    fn enqueue_done(&mut self) -> ClientFlowCommandHandle {
+        let handle = self.handle_generator.generate();
+        self.send_command_state.enqueue_done(handle);
+        handle
+    }
+
     pub async fn progress(&mut self) -> Result<ClientFlowEvent, ClientFlowError> {
         loop {
             if let Some(event) = self.progress_command().await? {
@@ -191,6 +209,21 @@ impl ClientFlow {
             _ => None,
         }
     }
+
+    pub fn idle(mut self, tag: Tag<'static>) -> ClientFlowIdle {
+        let idle_handle = self.enqueue_idle(tag);
+
+        ClientFlowIdle {
+            flow: Some(self),
+            idle_handle,
+            state: IdleState::Unknown,
+            done_enqueued: false,
+        }
+    }
+
+    pub(crate) fn clear_send_queue(&mut self) {
+        self.send_command_state.clear_send_queue();
+    }
 }
 
 /// A handle for an enqueued [`Command`].
@@ -250,6 +283,8 @@ pub enum ClientFlowError {
     ExpectedCrlfGotLf { discarded_bytes: Box<[u8]> },
     #[error("Received malformed message")]
     MalformedMessage { discarded_bytes: Box<[u8]> },
+    #[error("Called progress in wrong state")]
+    BadState,
 }
 
 #[derive(Debug, Default)]
@@ -264,3 +299,127 @@ impl ClientFlowCommandHandleGenerator {
         handle
     }
 }
+
+// -------------------------------------------------------------------------------------------------
+
+#[derive(Debug, Eq, PartialEq)]
+enum IdleState {
+    Unknown,
+    Accepted,
+    Rejected,
+}
+
+#[derive(Debug)]
+pub struct ClientFlowIdle {
+    flow: Option<ClientFlow>,
+    idle_handle: ClientFlowCommandHandle,
+    state: IdleState,
+    done_enqueued: bool,
+}
+
+impl ClientFlowIdle {
+    pub async fn progress(&mut self) -> Result<ClientFlowEventIdle, ClientFlowError> {
+        if self.state == IdleState::Rejected {
+            return Ok(ClientFlowEventIdle::Finished(
+                self.flow.take().ok_or(ClientFlowError::BadState)?,
+            ));
+        }
+
+        let flow = self.flow.as_mut().ok_or(ClientFlowError::BadState)?;
+
+        match flow.progress().await? {
+            ClientFlowEvent::CommandSent { handle, command } if handle == self.idle_handle => {
+                self.state = IdleState::Accepted;
+
+                Ok(ClientFlowEventIdle::Event(ClientFlowEvent::CommandSent {
+                    handle,
+                    command,
+                }))
+            }
+            ClientFlowEvent::CommandRejected {
+                handle,
+                command,
+                status,
+            } if handle == self.idle_handle => {
+                self.state = IdleState::Rejected;
+
+                // Important: Clear (possibly enqueued) DONE.
+                // No other command could have been enqueued after IDLE.
+                flow.clear_send_queue();
+
+                Ok(ClientFlowEventIdle::Event(
+                    ClientFlowEvent::CommandRejected {
+                        handle,
+                        command,
+                        status,
+                    },
+                ))
+            }
+            ClientFlowEvent::CommandSent { command, .. }
+                if command.tag == Tag::unvalidated("IMAP_FLOW_FAKE_DONE_TAG") =>
+            {
+                Ok(ClientFlowEventIdle::Finished(
+                    self.flow.take().ok_or(ClientFlowError::BadState)?,
+                ))
+            }
+            event => Ok(ClientFlowEventIdle::Event(event)),
+        }
+    }
+
+    pub fn is_done(&self) -> bool {
+        self.done_enqueued
+    }
+
+    pub fn done(&mut self) {
+        if !self.done_enqueued {
+            // `unwrap` can't fail because we guarantee `self.flow.is_some()` before `done()` is executed.
+            self.flow
+                .as_mut()
+                .ok_or(ClientFlowError::BadState)
+                .unwrap()
+                .enqueue_done();
+            self.done_enqueued = true;
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ClientFlowEventIdle {
+    Event(ClientFlowEvent),
+    Finished(ClientFlow),
+}
+
+// Note: We could use a more appropriate enum.
+// However, this would duplicate most ClientFlowEvent variants.
+// So, maybe it's better to add `ClientFlowEvent::{IdleRejected,DoneSent}`.
+//
+// #[derive(Debug)]
+// pub enum ClientFlowEventIdle {
+//     /// IDLE was sent.
+//     Sent {
+//         command: Command<'static>,
+//     },
+//     /// IDLE was accepted, i.e., got `+ ...`.
+//     Accepted {
+//         continuation: CommandContinuationRequest<'static>,
+//     },
+//     /// IDLE was rejected, i.e., got NO or BAD.
+//     /// TODO: Handle OK?
+//     Rejected {
+//         status: Status<'static>,
+//     },
+//     /// DONE was sent.
+//     /// The token can be exchanged to get a "normal" client again.
+//     Finished {
+//         token: IdleToken,
+//     },
+//     DataReceived {
+//         data: Data<'static>,
+//     },
+//     StatusReceived {
+//         status: Status<'static>,
+//     },
+//     ContinuationReceived {
+//         continuation: CommandContinuationRequest<'static>,
+//     },
+// }

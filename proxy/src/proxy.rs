@@ -308,6 +308,10 @@ fn handle_server_event(
             error!(role = "s2p", %error, "Connection terminated");
             return ControlFlow::Abort;
         }
+        Err(ClientFlowError::BadState) => {
+            error!(role = "s2p", "Called progress in wrong state");
+            return ControlFlow::Abort;
+        }
     };
 
     match event {
