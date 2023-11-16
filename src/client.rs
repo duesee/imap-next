@@ -3,7 +3,10 @@ use imap_codec::{
     decode::{GreetingDecodeError, ResponseDecodeError},
     imap_types::{
         command::Command,
-        response::{Data, Greeting, Response, Status, StatusBody, StatusKind, Tagged},
+        response::{
+            CommandContinuationRequest, Data, Greeting, Response, Status, StatusBody, StatusKind,
+            Tagged,
+        },
     },
     CommandCodec, GreetingCodec, ResponseCodec,
 };
@@ -153,9 +156,13 @@ impl ClientFlow {
                     }
                 }
                 Response::Data(data) => break Some(ClientFlowEvent::DataReceived { data }),
-                Response::CommandContinuationRequest(_) => {
-                    self.send_command_state.continue_command();
-                    break None;
+                Response::CommandContinuationRequest(continuation) => {
+                    if self.send_command_state.command_in_progress().is_some() {
+                        self.send_command_state.continue_command();
+                        break None;
+                    } else {
+                        break Some(ClientFlowEvent::ContinuationReceived { continuation });
+                    }
                 }
             }
         };
@@ -217,6 +224,9 @@ pub enum ClientFlowEvent {
     },
     StatusReceived {
         status: Status<'static>,
+    },
+    ContinuationReceived {
+        continuation: CommandContinuationRequest<'static>,
     },
 }
 

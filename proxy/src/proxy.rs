@@ -355,6 +355,12 @@ fn handle_server_event(
             let _handle = client_to_proxy.enqueue_status(status);
             // TODO: log handle
         }
+        ClientFlowEvent::ContinuationReceived { mut continuation } => {
+            trace!(response=%format!("{:?}", continuation).blue(), role = "s2p", "<--| Received continuation");
+            util::filter_capabilities_in_continuation(&mut continuation);
+            let _handle = client_to_proxy.enqueue_continuation(continuation);
+            // TODO: log handle
+        }
     }
 
     ControlFlow::Continue

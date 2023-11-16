@@ -2,7 +2,10 @@ use std::{fs::File, io::BufReader, path::Path};
 
 use imap_codec::imap_types::{
     core::NonEmptyVec,
-    response::{Bye, Capability, Code, Data, Greeting, Status, StatusBody, Tagged},
+    response::{
+        Bye, Capability, Code, CommandContinuationRequest, CommandContinuationRequestBasic, Data,
+        Greeting, Status, StatusBody, Tagged,
+    },
 };
 use rustls::{Certificate, PrivateKey};
 use thiserror::Error;
@@ -73,6 +76,21 @@ pub fn filter_capabilities_in_status(status: &mut Status) {
                 "Filtered capabilities in status",
             );
             *capabilities = filtered;
+        }
+    }
+}
+
+// Remove unsupported capabilities in command continuation request response.
+pub fn filter_capabilities_in_continuation(continuation: &mut CommandContinuationRequest) {
+    if let CommandContinuationRequest::Basic(basic) = continuation {
+        if let Some(Code::Capability(capabilities)) = basic.code() {
+            let capabilities = filter_capabilities(capabilities.clone());
+
+            *basic = CommandContinuationRequestBasic::new(
+                Some(Code::Capability(capabilities)),
+                basic.text().clone(),
+            )
+            .unwrap();
         }
     }
 }
