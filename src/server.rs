@@ -44,7 +44,7 @@ pub struct ServerFlow {
     stream: AnyStream,
     max_literal_size: u32,
 
-    next_response_handle: ServerFlowResponseHandle,
+    handle_generator: ServerFlowResponseHandleGenerator,
     send_response_state: SendResponseState<ResponseCodec, Option<ServerFlowResponseHandle>>,
     receive_command_state: ReceiveState<CommandCodec>,
 
@@ -78,7 +78,7 @@ impl ServerFlow {
         let server_flow = Self {
             stream,
             max_literal_size: options.max_literal_size,
-            next_response_handle: ServerFlowResponseHandle(0),
+            handle_generator: ServerFlowResponseHandleGenerator::default(),
             send_response_state,
             receive_command_state,
             literal_accept_text: options.literal_accept_text,
@@ -94,7 +94,7 @@ impl ServerFlow {
     /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
     /// enqueued.
     pub fn enqueue_data(&mut self, data: Data<'static>) -> ServerFlowResponseHandle {
-        let handle = self.next_response_handle();
+        let handle = self.handle_generator.generate();
         self.send_response_state
             .enqueue(Some(handle), Response::Data(data));
         handle
@@ -106,7 +106,7 @@ impl ServerFlow {
     /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
     /// enqueued.
     pub fn enqueue_status(&mut self, status: Status<'static>) -> ServerFlowResponseHandle {
-        let handle = self.next_response_handle();
+        let handle = self.handle_generator.generate();
         self.send_response_state
             .enqueue(Some(handle), Response::Status(status));
         handle
@@ -121,17 +121,11 @@ impl ServerFlow {
         &mut self,
         cotinuation: CommandContinuationRequest<'static>,
     ) -> ServerFlowResponseHandle {
-        let handle = self.next_response_handle();
+        let handle = self.handle_generator.generate();
         self.send_response_state.enqueue(
             Some(handle),
             Response::CommandContinuationRequest(cotinuation),
         );
-        handle
-    }
-
-    fn next_response_handle(&mut self) -> ServerFlowResponseHandle {
-        let handle = self.next_response_handle;
-        self.next_response_handle = ServerFlowResponseHandle(handle.0 + 1);
         handle
     }
 
@@ -251,4 +245,17 @@ pub enum ServerFlowError {
     MalformedMessage { discarded_bytes: Box<[u8]> },
     #[error("Literal was rejected because it was too long")]
     LiteralTooLong { discarded_bytes: Box<[u8]> },
+}
+
+#[derive(Debug, Default)]
+struct ServerFlowResponseHandleGenerator {
+    counter: u64,
+}
+
+impl ServerFlowResponseHandleGenerator {
+    fn generate(&mut self) -> ServerFlowResponseHandle {
+        let handle = ServerFlowResponseHandle(self.counter);
+        self.counter += self.counter.wrapping_add(1);
+        handle
+    }
 }

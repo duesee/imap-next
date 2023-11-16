@@ -36,7 +36,7 @@ impl Default for ClientFlowOptions {
 pub struct ClientFlow {
     stream: AnyStream,
 
-    next_command_handle: ClientFlowCommandHandle,
+    handle_generator: ClientFlowCommandHandleGenerator,
     send_command_state: SendCommandState<ClientFlowCommandHandle>,
     receive_response_state: ReceiveState<ResponseCodec>,
 }
@@ -82,7 +82,7 @@ impl ClientFlow {
 
         let client_flow = Self {
             stream,
-            next_command_handle: ClientFlowCommandHandle(0),
+            handle_generator: ClientFlowCommandHandleGenerator::default(),
             send_command_state,
             receive_response_state,
         };
@@ -96,9 +96,7 @@ impl ClientFlow {
     /// [`ClientFlow::progress`]. All [`Command`]s are sent in the same order they have been
     /// enqueued.
     pub fn enqueue_command(&mut self, command: Command<'static>) -> ClientFlowCommandHandle {
-        // TODO(#53)
-        let handle = self.next_command_handle;
-        self.next_command_handle = ClientFlowCommandHandle(handle.0 + 1);
+        let handle = self.handle_generator.generate();
         self.send_command_state.enqueue(handle, command);
         handle
     }
@@ -245,4 +243,17 @@ pub enum ClientFlowError {
     ExpectedCrlfGotLf { discarded_bytes: Box<[u8]> },
     #[error("Received malformed message")]
     MalformedMessage { discarded_bytes: Box<[u8]> },
+}
+
+#[derive(Debug, Default)]
+struct ClientFlowCommandHandleGenerator {
+    counter: u64,
+}
+
+impl ClientFlowCommandHandleGenerator {
+    fn generate(&mut self) -> ClientFlowCommandHandle {
+        let handle = ClientFlowCommandHandle(self.counter);
+        self.counter += self.counter.wrapping_add(1);
+        handle
+    }
 }
