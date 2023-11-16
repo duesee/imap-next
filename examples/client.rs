@@ -20,7 +20,7 @@ async fn main() {
 
     let handle = client.enqueue_command(Command {
         tag: Tag::try_from("A1").unwrap(),
-        body: CommandBody::Noop,
+        body: CommandBody::login("alice", "pa²²w0rd").unwrap(),
     });
 
     loop {
