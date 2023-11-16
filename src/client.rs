@@ -191,6 +191,22 @@ impl ClientFlow {
             _ => None,
         }
     }
+
+    /// Is the client in a state where the last literal is on hold?
+    /// This can be used to check if we are idling.
+    pub fn is_idling(&self) -> bool {
+        self.send_command_state.is_literal_on_hold()
+    }
+
+    pub fn stop_idling(&mut self) -> Result<(), ()> {
+        if !self.is_idling() {
+            return Err(());
+        }
+
+        self.send_command_state.release_last_literal();
+
+        Ok(())
+    }
 }
 
 /// A handle for an enqueued [`Command`].

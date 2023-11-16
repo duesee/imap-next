@@ -3,7 +3,10 @@ use std::{collections::VecDeque, fmt::Debug};
 use bytes::BytesMut;
 use imap_codec::{
     encode::{Encoder, Fragment},
-    imap_types::command::Command,
+    imap_types::{
+        command::{Command, CommandBody},
+        core::LiteralMode,
+    },
     CommandCodec,
 };
 use tokio::io::AsyncWriteExt;
@@ -33,7 +36,23 @@ impl<K> SendCommandState<K> {
     }
 
     pub fn enqueue(&mut self, key: K, command: Command<'static>) {
-        let fragments = self.codec.encode(&command).collect();
+        let mut fragments: VecDeque<_> = self.codec.encode(&command).collect();
+
+        // C: A1 IDLE\r\nDONE\r\n
+        //    ^^^^^^^^^^^
+        //    |          ^^^^^^^^
+        //    |          |
+        //    Command    Command Continuation
+        //
+        // IDLE is a command with a command continuation similar to literals.
+        // Thus, we can reuse our literal machinery.
+        if matches!(&command.body, CommandBody::Idle) {
+            fragments.push_back(Fragment::Literal {
+                data: b"DONE\r\n".to_vec(),
+                mode: LiteralMode::Sync,
+            });
+        }
+
         let entry = SendCommandQueueEntry {
             key,
             command,
@@ -44,6 +63,24 @@ impl<K> SendCommandState<K> {
 
     pub fn command_in_progress(&self) -> Option<&Command<'static>> {
         self.send_progress.as_ref().map(|x| &x.command)
+    }
+
+    pub fn is_literal_on_hold(&self) -> bool {
+        if let Some(progress) = &self.send_progress {
+            if let Some(literal) = &progress.next_literal {
+                return literal.on_hold;
+            }
+        }
+
+        false
+    }
+
+    pub fn release_last_literal(&mut self) {
+        if let Some(progress) = &mut self.send_progress {
+            if let Some(literal) = &mut progress.next_literal {
+                literal.on_hold = false;
+            }
+        }
     }
 
     pub fn abort_command(&mut self) -> Option<(K, Command<'static>)> {
@@ -99,8 +136,9 @@ impl<K> SendCommandState<K> {
 
         // Handle the outstanding literal first if there is one
         if let Some(literal_progress) = progress.next_literal.take() {
-            if literal_progress.received_continue {
-                // We received a `Continue` from the server, we can send the literal now
+            if literal_progress.received_continue && !literal_progress.on_hold {
+                // We received a `Continue` from the server, and are not holding the literal back.
+                // We can send the literal now.
                 self.write_buffer.extend(literal_progress.data);
             } else {
                 // Delay this literal because we still wait for the `Continue` from the server
@@ -121,12 +159,18 @@ impl<K> SendCommandState<K> {
                         self.write_buffer.extend(data);
                     }
                     Fragment::Literal { data, mode: _mode } => {
+                        let on_hold = match &progress.command.body {
+                            CommandBody::Idle => true,
+                            _ => false,
+                        };
+
                         // TODO: Handle `LITERAL{+,-}`.
                         // Delay this literal because we need to wait for a `Continue` from
                         // the server
                         progress.next_literal = Some(SendCommandLiteralProgress {
                             data,
                             received_continue: false,
+                            on_hold,
                         });
                         break true;
                     }
@@ -177,6 +221,9 @@ struct SendCommandLiteralProgress {
     data: Vec<u8>,
     // Was the literal already acknowledged by a `Continue` from the server?
     received_continue: bool,
+    // Was the literal already acknowledged by us?
+    // Note: This artificial delay is useful to implement IDLE.
+    on_hold: bool,
 }
 
 #[derive(Debug)]
