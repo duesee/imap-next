@@ -8,7 +8,7 @@ use std::{
 use imap_codec::imap_types::{
     command::{Command, CommandBody},
     core::Tag,
-    response::{Bye, Data, Response, Status, StatusBody, Tagged},
+    response::{Bye, CommandContinuationRequest, Data, Response, Status, StatusBody, Tagged},
 };
 use imap_flow::client::{ClientFlow, ClientFlowCommandHandle, ClientFlowError, ClientFlowEvent};
 use tag_generator::TagGenerator;
@@ -46,6 +46,15 @@ pub trait Task: 'static {
     ) -> Option<StatusBody<'static>> {
         // Default: Don't process untagged status
         Some(status_body)
+    }
+
+    /// Process an command continuation request response.
+    fn process_continuation(
+        &mut self,
+        continuation: CommandContinuationRequest<'static>,
+    ) -> Option<CommandContinuationRequest<'static>> {
+        // Default: Don't process command continuation request response
+        Some(continuation)
     }
 
     /// Process bye response.
@@ -128,6 +137,17 @@ impl Scheduler {
                         task.process_data(data)
                     }) {
                         return Ok(SchedulerEvent::Unsolicited(Response::Data(data)));
+                    }
+                }
+                ClientFlowEvent::ContinuationReceived { continuation } => {
+                    if let Some(continuation) = trickle_down(
+                        continuation,
+                        self.active_tasks_mut(),
+                        |task, continuation| task.process_continuation(continuation),
+                    ) {
+                        return Ok(SchedulerEvent::Unsolicited(
+                            Response::CommandContinuationRequest(continuation),
+                        ));
                     }
                 }
                 ClientFlowEvent::StatusReceived { status } => match status {
@@ -301,6 +321,11 @@ trait TaskAny {
     fn process_untagged(&mut self, status_body: StatusBody<'static>)
         -> Option<StatusBody<'static>>;
 
+    fn process_continuation(
+        &mut self,
+        continuation: CommandContinuationRequest<'static>,
+    ) -> Option<CommandContinuationRequest<'static>>;
+
     fn process_bye(&mut self, bye: Bye<'static>) -> Option<Bye<'static>>;
 
     fn process_tagged(self: Box<Self>, status_body: StatusBody<'static>) -> Box<dyn Any>;
@@ -319,6 +344,13 @@ where
         status_body: StatusBody<'static>,
     ) -> Option<StatusBody<'static>> {
         T::process_untagged(self, status_body)
+    }
+
+    fn process_continuation(
+        &mut self,
+        continuation: CommandContinuationRequest<'static>,
+    ) -> Option<CommandContinuationRequest<'static>> {
+        T::process_continuation(self, continuation)
     }
 
     fn process_bye(&mut self, bye: Bye<'static>) -> Option<Bye<'static>> {

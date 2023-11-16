@@ -46,6 +46,9 @@ async fn main() {
             ClientFlowEvent::StatusReceived { status } => {
                 println!("status received: {status:?}");
             }
+            ClientFlowEvent::ContinuationReceived { continuation } => {
+                println!("continuation received: {continuation:?}");
+            }
         }
     }
 }

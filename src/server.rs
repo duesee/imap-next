@@ -112,6 +112,23 @@ impl ServerFlow {
         handle
     }
 
+    /// Enqueues the [`CommandContinuationRequest`] response for being sent to the client.
+    ///
+    /// The response is not sent immediately but during one of the next calls of
+    /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
+    /// enqueued.
+    pub fn enqueue_continuation(
+        &mut self,
+        cotinuation: CommandContinuationRequest<'static>,
+    ) -> ServerFlowResponseHandle {
+        let handle = self.next_response_handle();
+        self.send_response_state.enqueue(
+            Some(handle),
+            Response::CommandContinuationRequest(cotinuation),
+        );
+        handle
+    }
+
     fn next_response_handle(&mut self) -> ServerFlowResponseHandle {
         let handle = self.next_response_handle;
         self.next_response_handle = ServerFlowResponseHandle(handle.0 + 1);

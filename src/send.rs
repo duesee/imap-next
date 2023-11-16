@@ -54,7 +54,6 @@ impl<K> SendCommandState<K> {
     }
 
     pub fn continue_command(&mut self) {
-        // TODO: Should we handle unexpected continues?
         let Some(write_progress) = self.send_progress.as_mut() else {
             return;
         };
