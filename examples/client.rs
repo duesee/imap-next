@@ -20,7 +20,7 @@ async fn main() {
 
     let handle = client.enqueue_command(Command {
         tag: Tag::try_from("A1").unwrap(),
-        body: CommandBody::login("alice", "pa²²w0rd").unwrap(),
+        body: CommandBody::login("Al¹cE", "pa²²w0rd").unwrap(),
     });
 
     loop {
@@ -47,7 +47,7 @@ async fn main() {
                 println!("status received: {status:?}");
             }
             ClientFlowEvent::ContinuationReceived { continuation } => {
-                println!("continuation received: {continuation:?}");
+                println!("unexpected continuation received: {continuation:?}");
             }
         }
     }
