@@ -1,12 +1,12 @@
 use bytes::BytesMut;
 use imap_codec::{
-    decode::CommandDecodeError,
+    decode::{CommandDecodeError, Decoder, IdleDoneDecodeError},
     imap_types::{
         command::Command,
         core::Text,
         response::{CommandContinuationRequest, Data, Greeting, Response, Status},
     },
-    CommandCodec, GreetingCodec, ResponseCodec,
+    CommandCodec, GreetingCodec, IdleDoneCodec, ResponseCodec,
 };
 use thiserror::Error;
 
@@ -40,52 +40,40 @@ impl Default for ServerFlowOptions {
 }
 
 #[derive(Debug)]
-pub struct ServerFlow {
+pub struct ServerFlow<C>
+where
+    C: Decoder,
+{
     stream: AnyStream,
     max_literal_size: u32,
 
     handle_generator: ServerFlowResponseHandleGenerator,
     send_response_state: SendResponseState<ResponseCodec, Option<ServerFlowResponseHandle>>,
-    receive_command_state: ReceiveState<CommandCodec>,
+    receive_state: ReceiveState<C>,
 
     literal_accept_text: Text<'static>,
     literal_reject_text: Text<'static>,
 }
 
-impl ServerFlow {
-    pub async fn send_greeting(
-        mut stream: AnyStream,
-        options: ServerFlowOptions,
-        greeting: Greeting<'static>,
-    ) -> Result<(Self, Greeting<'static>), ServerFlowError> {
-        // Send greeting
-        let write_buffer = BytesMut::new();
-        let mut send_greeting_state =
-            SendResponseState::new(GreetingCodec::default(), write_buffer);
-        send_greeting_state.enqueue((), greeting);
-        let greeting = loop {
-            if let Some(((), greeting)) = send_greeting_state.progress(&mut stream).await? {
-                break greeting;
+impl<C> ServerFlow<C>
+where
+    C: Decoder,
+{
+    async fn progress_response(&mut self) -> Result<Option<ServerFlowEvent>, ServerFlowError> {
+        match self.send_response_state.progress(&mut self.stream).await? {
+            Some((Some(handle), response)) => {
+                // A response was sucessfully sent, inform the caller
+                Ok(Some(ServerFlowEvent::ResponseSent { handle, response }))
             }
-        };
-
-        // Successfully sent greeting, construct instance
-        let write_buffer = send_greeting_state.finish();
-        let send_response_state = SendResponseState::new(ResponseCodec::default(), write_buffer);
-        let read_buffer = BytesMut::new();
-        let receive_command_state =
-            ReceiveState::new(CommandCodec::default(), options.crlf_relaxed, read_buffer);
-        let server_flow = Self {
-            stream,
-            max_literal_size: options.max_literal_size,
-            handle_generator: ServerFlowResponseHandleGenerator::default(),
-            send_response_state,
-            receive_command_state,
-            literal_accept_text: options.literal_accept_text,
-            literal_reject_text: options.literal_reject_text,
-        };
-
-        Ok((server_flow, greeting))
+            Some((None, _)) => {
+                // An internally created response was sent, don't inform the caller
+                Ok(None)
+            }
+            _ => {
+                // No progress yet
+                Ok(None)
+            }
+        }
     }
 
     /// Enqueues the [`Data`] response for being sent to the client.
@@ -128,6 +116,43 @@ impl ServerFlow {
         );
         handle
     }
+}
+
+impl ServerFlow<CommandCodec> {
+    pub async fn send_greeting(
+        mut stream: AnyStream,
+        options: ServerFlowOptions,
+        greeting: Greeting<'static>,
+    ) -> Result<(Self, Greeting<'static>), ServerFlowError> {
+        // Send greeting
+        let write_buffer = BytesMut::new();
+        let mut send_greeting_state =
+            SendResponseState::new(GreetingCodec::default(), write_buffer);
+        send_greeting_state.enqueue((), greeting);
+        let greeting = loop {
+            if let Some(((), greeting)) = send_greeting_state.progress(&mut stream).await? {
+                break greeting;
+            }
+        };
+
+        // Successfully sent greeting, construct instance
+        let write_buffer = send_greeting_state.finish();
+        let send_response_state = SendResponseState::new(ResponseCodec::default(), write_buffer);
+        let read_buffer = BytesMut::new();
+        let receive_command_state =
+            ReceiveState::new(CommandCodec::default(), options.crlf_relaxed, read_buffer);
+        let server_flow = Self {
+            stream,
+            max_literal_size: options.max_literal_size,
+            handle_generator: ServerFlowResponseHandleGenerator::default(),
+            send_response_state,
+            receive_state: receive_command_state,
+            literal_accept_text: options.literal_accept_text,
+            literal_reject_text: options.literal_reject_text,
+        };
+
+        Ok((server_flow, greeting))
+    }
 
     pub async fn progress(&mut self) -> Result<ServerFlowEvent, ServerFlowError> {
         loop {
@@ -141,31 +166,10 @@ impl ServerFlow {
         }
     }
 
-    async fn progress_response(&mut self) -> Result<Option<ServerFlowEvent>, ServerFlowError> {
-        match self.send_response_state.progress(&mut self.stream).await? {
-            Some((Some(handle), response)) => {
-                // A response was sucessfully sent, inform the caller
-                Ok(Some(ServerFlowEvent::ResponseSent { handle, response }))
-            }
-            Some((None, _)) => {
-                // An internally created response was sent, don't inform the caller
-                Ok(None)
-            }
-            _ => {
-                // No progress yet
-                Ok(None)
-            }
-        }
-    }
-
     async fn progress_command(&mut self) -> Result<Option<ServerFlowEvent>, ServerFlowError> {
-        match self
-            .receive_command_state
-            .progress(&mut self.stream)
-            .await?
-        {
+        match self.receive_state.progress(&mut self.stream).await? {
             ReceiveEvent::DecodingSuccess(command) => {
-                self.receive_command_state.finish_message();
+                self.receive_state.finish_message();
                 Ok(Some(ServerFlowEvent::CommandReceived { command }))
             }
             ReceiveEvent::DecodingFailure(CommandDecodeError::LiteralFound {
@@ -174,7 +178,7 @@ impl ServerFlow {
                 mode: _mode,
             }) => {
                 if length > self.max_literal_size {
-                    let discarded_bytes = self.receive_command_state.discard_message();
+                    let discarded_bytes = self.receive_state.discard_message();
 
                     // Inform the client that the literal was rejected.
                     // This should never fail because the text is not Base64.
@@ -185,7 +189,7 @@ impl ServerFlow {
 
                     Err(ServerFlowError::LiteralTooLong { discarded_bytes })
                 } else {
-                    self.receive_command_state.start_literal(length);
+                    self.receive_state.start_literal(length);
 
                     // Inform the client that the literal was accepted.
                     // This should never fail because the text is not Base64.
@@ -201,13 +205,34 @@ impl ServerFlow {
             ReceiveEvent::DecodingFailure(
                 CommandDecodeError::Failed | CommandDecodeError::Incomplete,
             ) => {
-                let discarded_bytes = self.receive_command_state.discard_message();
+                let discarded_bytes = self.receive_state.discard_message();
                 Err(ServerFlowError::MalformedMessage { discarded_bytes })
             }
             ReceiveEvent::ExpectedCrlfGotLf => {
-                let discarded_bytes = self.receive_command_state.discard_message();
+                let discarded_bytes = self.receive_state.discard_message();
                 Err(ServerFlowError::ExpectedCrlfGotLf { discarded_bytes })
             }
+        }
+    }
+
+    pub fn accept_idle(
+        mut self,
+        continuation: CommandContinuationRequest<'static>,
+    ) -> ServerFlow<IdleDoneCodec> {
+        self.enqueue_continuation(continuation);
+
+        ServerFlow {
+            stream: self.stream,
+            max_literal_size: self.max_literal_size,
+            handle_generator: self.handle_generator,
+            send_response_state: self.send_response_state,
+            receive_state: ReceiveState::new(
+                IdleDoneCodec::new(),
+                true,
+                self.receive_state.finish(),
+            ),
+            literal_accept_text: self.literal_accept_text,
+            literal_reject_text: self.literal_reject_text,
         }
     }
 }
@@ -245,6 +270,75 @@ pub enum ServerFlowError {
     MalformedMessage { discarded_bytes: Box<[u8]> },
     #[error("Literal was rejected because it was too long")]
     LiteralTooLong { discarded_bytes: Box<[u8]> },
+}
+
+// TODO: Binding
+#[derive(Debug)]
+pub struct DoneToken;
+
+impl ServerFlow<IdleDoneCodec> {
+    pub async fn progress(&mut self) -> Result<ServerFlowEventIdle, ServerFlowError> {
+        loop {
+            if let Some(event) = self.progress_response().await? {
+                if let ServerFlowEvent::ResponseSent { handle, response } = event {
+                    return Ok(ServerFlowEventIdle::ResponseSent { handle, response });
+                } else {
+                    // TODO
+                    unreachable!()
+                }
+            }
+
+            if let Some(()) = self.progress_done().await? {
+                return Ok(ServerFlowEventIdle::Finished(DoneToken));
+            }
+        }
+    }
+
+    async fn progress_done(&mut self) -> Result<Option<()>, ServerFlowError> {
+        match self.receive_state.progress(&mut self.stream).await? {
+            ReceiveEvent::DecodingSuccess(_) => {
+                self.receive_state.finish_message();
+                Ok(Some(()))
+            }
+            ReceiveEvent::DecodingFailure(
+                IdleDoneDecodeError::Failed | IdleDoneDecodeError::Incomplete,
+            ) => {
+                let discarded_bytes = self.receive_state.discard_message();
+                Err(ServerFlowError::MalformedMessage { discarded_bytes })
+            }
+            ReceiveEvent::ExpectedCrlfGotLf => {
+                let discarded_bytes = self.receive_state.discard_message();
+                Err(ServerFlowError::ExpectedCrlfGotLf { discarded_bytes })
+            }
+        }
+    }
+
+    pub fn finish_idle(self, _: DoneToken) -> ServerFlow<CommandCodec> {
+        ServerFlow {
+            stream: self.stream,
+            max_literal_size: self.max_literal_size,
+            handle_generator: self.handle_generator,
+            send_response_state: self.send_response_state,
+            receive_state: ReceiveState::new(
+                CommandCodec::new(),
+                true,
+                self.receive_state.finish(),
+            ),
+            literal_accept_text: self.literal_accept_text,
+            literal_reject_text: self.literal_reject_text,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ServerFlowEventIdle {
+    ResponseSent {
+        /// The handle of the enqueued [`Response`].
+        handle: ServerFlowResponseHandle,
+        /// Formerly enqueued [`Response`] that was now sent.
+        response: Response<'static>,
+    },
+    Finished(DoneToken),
 }
 
 #[derive(Debug, Default)]
