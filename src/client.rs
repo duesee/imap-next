@@ -204,31 +204,39 @@ pub struct ClientFlowCommandHandle(u64);
 
 #[derive(Debug)]
 pub enum ClientFlowEvent {
-    /// The enqueued [`Command`] was sent successfully.
+    /// Enqueued [`Command`] successfully sent.
     CommandSent {
-        /// The handle of the enqueued [`Command`].
+        /// Handle to the enqueued [`Command`].
         handle: ClientFlowCommandHandle,
-        /// Formerly enqueued [`Command`] that was now sent.
+        /// Formerly enqueued [`Command`].
         command: Command<'static>,
     },
-    /// The enqueued [`Command`] wasn't sent completely because the server rejected it.
+    /// Enqueued [`Command`] rejected.
+    ///
+    /// Note: Emitted when the server rejected a command literal with `BAD`.
     CommandRejected {
-        /// The handle of the enqueued [`Command`].
+        /// Handle to the enqueued [`Command`].
         handle: ClientFlowCommandHandle,
-        /// Formerly enqueued [`Command`] that was now rejected.
+        /// Formerly enqueued [`Command`].
         command: Command<'static>,
-        /// The [`Status`] sent by the server in order to reject the [`Command`].
-        /// [`ClientFlow`] has already handled this [`Status`] but it might still have
+        /// [`Status`] sent by the server in order to reject the [`Command`].
+        ///
+        /// Note: [`ClientFlow`] already handled this [`Status`] but it might still have
         /// useful information that could be logged or displayed to the user
         /// (e.g. [`Code::Alert`](imap_codec::imap_types::response::Code::Alert)).
         status: Status<'static>,
     },
-    DataReceived {
-        data: Data<'static>,
-    },
-    StatusReceived {
-        status: Status<'static>,
-    },
+    /// Server [`Data`] received.
+    DataReceived { data: Data<'static> },
+    /// Server [`Status`] received.
+    StatusReceived { status: Status<'static> },
+    /// Server [`CommandContinuationRequest`] response received.
+    ///
+    /// Note: The received continuation was not part of [`ClientFlow`] literal handling.
+    /// It is either ...
+    /// * an acknowledgement to send authentication data,
+    /// * an acknowledgement to proceed with IDLE,
+    /// * or an unsolicited continuation (in which case processing is deferred to the user).
     ContinuationReceived {
         continuation: CommandContinuationRequest<'static>,
     },
