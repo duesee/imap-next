@@ -162,8 +162,7 @@ impl ClientFlow {
                 }
                 Response::Data(data) => break Some(ClientFlowEvent::DataReceived { data }),
                 Response::CommandContinuationRequest(continuation) => {
-                    if self.send_command_state.command_in_progress().is_some() {
-                        self.send_command_state.continue_command();
+                    if self.send_command_state.continue_command() {
                         break None;
                     } else {
                         break Some(ClientFlowEvent::ContinuationReceived { continuation });
