@@ -34,15 +34,15 @@ impl Default for ClientFlowOptions {
 }
 
 #[derive(Debug)]
-pub struct ClientFlow {
+pub struct ClientFlow<S> {
     stream: AnyStream,
 
     handle_generator: ClientFlowCommandHandleGenerator,
-    send_command_state: SendCommandState<ClientFlowCommandHandle>,
-    receive_response_state: ReceiveState<ResponseCodec>,
+    send_state: S,
+    receive_state: ReceiveState<ResponseCodec>,
 }
 
-impl ClientFlow {
+impl ClientFlow<SendCommandState<ClientFlowCommandHandle>> {
     pub async fn receive_greeting(
         mut stream: AnyStream,
         options: ClientFlowOptions,
@@ -84,8 +84,8 @@ impl ClientFlow {
         let client_flow = Self {
             stream,
             handle_generator: ClientFlowCommandHandleGenerator::default(),
-            send_command_state,
-            receive_response_state,
+            send_state: send_command_state,
+            receive_state: receive_response_state,
         };
 
         Ok((client_flow, greeting))
@@ -98,7 +98,7 @@ impl ClientFlow {
     /// enqueued.
     pub fn enqueue_command(&mut self, command: Command<'static>) -> ClientFlowCommandHandle {
         let handle = self.handle_generator.generate();
-        self.send_command_state.enqueue(handle, command);
+        self.send_state.enqueue(handle, command);
         handle
     }
 
@@ -109,13 +109,13 @@ impl ClientFlow {
     /// enqueued.
     fn enqueue_idle(&mut self, tag: Tag<'static>) -> ClientFlowCommandHandle {
         let handle = self.handle_generator.generate();
-        self.send_command_state.enqueue_idle(handle, tag);
+        self.send_state.enqueue_idle(handle, tag);
         handle
     }
 
     fn enqueue_done(&mut self) -> ClientFlowCommandHandle {
         let handle = self.handle_generator.generate();
-        self.send_command_state.enqueue_done(handle);
+        self.send_state.enqueue_done(handle);
         handle
     }
 
@@ -132,7 +132,7 @@ impl ClientFlow {
     }
 
     async fn progress_command(&mut self) -> Result<Option<ClientFlowEvent>, ClientFlowError> {
-        match self.send_command_state.progress(&mut self.stream).await? {
+        match self.send_state.progress(&mut self.stream).await? {
             Some((handle, command)) => Ok(Some(ClientFlowEvent::CommandSent { handle, command })),
             None => Ok(None),
         }
@@ -140,28 +140,24 @@ impl ClientFlow {
 
     async fn progress_response(&mut self) -> Result<Option<ClientFlowEvent>, ClientFlowError> {
         let event = loop {
-            let response = match self
-                .receive_response_state
-                .progress(&mut self.stream)
-                .await?
-            {
+            let response = match self.receive_state.progress(&mut self.stream).await? {
                 ReceiveEvent::DecodingSuccess(response) => {
-                    self.receive_response_state.finish_message();
+                    self.receive_state.finish_message();
                     response
                 }
                 ReceiveEvent::DecodingFailure(ResponseDecodeError::LiteralFound { length }) => {
                     // The client must accept the literal in any case.
-                    self.receive_response_state.start_literal(length);
+                    self.receive_state.start_literal(length);
                     continue;
                 }
                 ReceiveEvent::DecodingFailure(
                     ResponseDecodeError::Failed | ResponseDecodeError::Incomplete,
                 ) => {
-                    let discarded_bytes = self.receive_response_state.discard_message();
+                    let discarded_bytes = self.receive_state.discard_message();
                     return Err(ClientFlowError::MalformedMessage { discarded_bytes });
                 }
                 ReceiveEvent::ExpectedCrlfGotLf => {
-                    let discarded_bytes = self.receive_response_state.discard_message();
+                    let discarded_bytes = self.receive_state.discard_message();
                     return Err(ClientFlowError::ExpectedCrlfGotLf { discarded_bytes });
                 }
             };
@@ -180,7 +176,7 @@ impl ClientFlow {
                 }
                 Response::Data(data) => break Some(ClientFlowEvent::DataReceived { data }),
                 Response::CommandContinuationRequest(continuation) => {
-                    if self.send_command_state.continue_command() {
+                    if self.send_state.continue_command() {
                         break None;
                     } else {
                         break Some(ClientFlowEvent::ContinuationReceived { continuation });
@@ -196,7 +192,7 @@ impl ClientFlow {
         &mut self,
         status: &Status,
     ) -> Option<(ClientFlowCommandHandle, Command<'static>)> {
-        let command = self.send_command_state.command_in_progress()?;
+        let command = self.send_state.command_in_progress()?;
 
         match status {
             Status::Tagged(Tagged {
@@ -204,7 +200,7 @@ impl ClientFlow {
                 body: StatusBody { kind, .. },
                 ..
             }) if *kind == StatusKind::Bad && tag == &command.tag => {
-                self.send_command_state.abort_command()
+                self.send_state.abort_command()
             }
             _ => None,
         }
@@ -222,7 +218,7 @@ impl ClientFlow {
     }
 
     pub(crate) fn clear_send_queue(&mut self) {
-        self.send_command_state.clear_send_queue();
+        self.send_state.clear_send_queue();
     }
 }
 
@@ -311,7 +307,7 @@ enum IdleState {
 
 #[derive(Debug)]
 pub struct ClientFlowIdle {
-    flow: Option<ClientFlow>,
+    flow: Option<ClientFlow<SendCommandState<ClientFlowCommandHandle>>>,
     idle_handle: ClientFlowCommandHandle,
     state: IdleState,
     done_enqueued: bool,
@@ -386,7 +382,7 @@ impl ClientFlowIdle {
 #[derive(Debug)]
 pub enum ClientFlowEventIdle {
     Event(ClientFlowEvent),
-    Finished(ClientFlow),
+    Finished(ClientFlow<SendCommandState<ClientFlowCommandHandle>>),
 }
 
 // Note: We could use a more appropriate enum.
