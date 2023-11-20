@@ -53,18 +53,20 @@ impl<K> SendCommandState<K> {
             .map(|progress| (progress.key, progress.command))
     }
 
-    pub fn continue_command(&mut self) {
+    pub fn continue_command(&mut self) -> bool {
         let Some(write_progress) = self.send_progress.as_mut() else {
-            return;
+            return false;
         };
         let Some(literal_progress) = write_progress.next_literal.as_mut() else {
-            return;
+            return false;
         };
         if literal_progress.received_continue {
-            return;
+            return false;
         }
 
         literal_progress.received_continue = true;
+
+        true
     }
 
     pub async fn progress(
