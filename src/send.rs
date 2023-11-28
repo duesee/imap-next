@@ -33,13 +33,8 @@ impl<K> SendCommandState<K> {
     }
 
     pub fn enqueue(&mut self, key: K, command: Command<'static>) {
-        let fragments = self.codec.encode(&command).collect();
-        let entry = SendCommandQueueEntry {
-            key,
-            command,
-            fragments,
-        };
-        self.send_queue.push_back(entry);
+        self.send_queue
+            .push_back(SendCommandQueueEntry { key, command });
     }
 
     pub fn command_in_progress(&self) -> Option<&Command<'static>> {
@@ -87,11 +82,13 @@ impl<K> SendCommandState<K> {
                 };
 
                 // Start sending the next command
+                let next_fragments = self.codec.encode(&entry.command).collect();
+
                 SendCommandProgress {
                     key: entry.key,
                     command: entry.command,
                     next_literal: None,
-                    next_fragments: entry.fragments,
+                    next_fragments,
                 }
             }
         };
@@ -158,7 +155,6 @@ impl<K> SendCommandState<K> {
 struct SendCommandQueueEntry<K> {
     key: K,
     command: Command<'static>,
-    fragments: VecDeque<Fragment>,
 }
 
 #[derive(Debug)]
