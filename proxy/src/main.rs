@@ -90,6 +90,6 @@ async fn handle_service(service: Service) {
 #[instrument(name = "client", skip_all, fields(addr = %proxy.client_addr()))]
 async fn handle_client(proxy: Proxy<ClientAcceptedState>) -> Result<()> {
     let proxy = proxy.connect_to_server().await?;
-    proxy.start_conversion().await;
+    proxy.start_conversation().await;
     Ok(())
 }

@@ -186,7 +186,7 @@ pub struct ConnectedState {
 impl State for ConnectedState {}
 
 impl Proxy<ConnectedState> {
-    pub async fn start_conversion(self) {
+    pub async fn start_conversation(self) {
         let (mut proxy_to_server, mut greeting) = {
             // TODO: Read options from config
             let options = ClientFlowOptions { crlf_relaxed: true };
