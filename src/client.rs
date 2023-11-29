@@ -1,16 +1,19 @@
 use bytes::BytesMut;
 use imap_codec::{
     decode::{GreetingDecodeError, ResponseDecodeError},
+    encode::Encoder,
     imap_types::{
+        auth::AuthenticateData,
         command::Command,
         response::{
             CommandContinuationRequest, Data, Greeting, Response, Status, StatusBody, StatusKind,
             Tagged,
         },
     },
-    CommandCodec, GreetingCodec, ResponseCodec,
+    AuthenticateDataCodec, CommandCodec, GreetingCodec, ResponseCodec,
 };
 use thiserror::Error;
+use tokio::io::AsyncWriteExt;
 
 use crate::{
     receive::{ReceiveEvent, ReceiveState},
@@ -99,6 +102,15 @@ impl ClientFlow {
         let handle = self.handle_generator.generate();
         self.send_command_state.enqueue(handle, command);
         handle
+    }
+
+    // TODO
+    pub async fn enqueue_authenticate_data(&mut self, data: AuthenticateData) {
+        self.stream
+            .0
+            .write_all(&AuthenticateDataCodec::new().encode(&data).dump())
+            .await
+            .unwrap();
     }
 
     pub async fn progress(&mut self) -> Result<ClientFlowEvent, ClientFlowError> {
