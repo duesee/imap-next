@@ -1,8 +1,13 @@
+#[path = "common/common.rs"]
+mod common;
+
+use argh::FromArgs;
+use common::TlsStream;
 use imap_codec::imap_types::{
     auth::{AuthMechanism, AuthenticateData},
     command::{Command, CommandBody},
     core::Tag,
-    response::{Capability, Code, CommandContinuationRequest, Status, Tagged},
+    response::{CommandContinuationRequest, Status, Tagged},
     secret::Secret,
 };
 use imap_flow::{
@@ -13,6 +18,38 @@ use rsasl::prelude::*;
 use tokio::net::TcpStream;
 use tracing::{error, info, info_span, warn, Level};
 
+#[derive(Debug, FromArgs)]
+/// Client (Authenticate).
+struct Arguments {
+    /// host
+    #[argh(positional)]
+    host: String,
+
+    /// port
+    #[argh(positional)]
+    port: u16,
+
+    /// username
+    #[argh(positional)]
+    username: String,
+
+    /// password
+    #[argh(positional)]
+    password: String,
+
+    /// allow authentication mechanism (can be used multiple times)
+    #[argh(option)]
+    auth: Vec<String>,
+
+    /// allow initial response (SASL-IR)
+    #[argh(switch)]
+    ir: bool,
+
+    /// don't use TLS (insecure)
+    #[argh(switch)]
+    insecure: bool,
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     tracing_subscriber::fmt()
@@ -22,31 +59,20 @@ async fn main() {
         .without_time()
         .init();
 
-    let stream = TcpStream::connect("127.0.0.1:12345").await.unwrap();
+    let args: Arguments = argh::from_env();
 
-    let (mut client, greeting) =
-        ClientFlow::receive_greeting(AnyStream::new(stream), ClientFlowOptions::default())
-            .await
-            .unwrap();
-
-    let Some(Code::Capability(capabilities)) = greeting.code else {
-        error!("We expect a `Code::Capability` in the greeting");
-        return;
+    let stream = if args.insecure {
+        AnyStream::new(TcpStream::connect((args.host, args.port)).await.unwrap())
+    } else {
+        AnyStream::new(TlsStream::connect(&args.host, args.port).await)
     };
 
-    // Are we allowed to send an initial SASL response?
-    let is_sasl_ir_supported = capabilities.as_ref().contains(&Capability::SaslIr);
-
-    // Convert `imap-types` `AuthMechanism`s to `rsasl´ `Mechname`s.
-    let authentication_mechanisms: Vec<String> = capabilities
-        .into_iter()
-        .filter_map(|cap| {
-            if let Capability::Auth(mech) = cap {
-                Some(mech.to_string())
-            } else {
-                None
-            }
-        })
+    // The client will typically agree with the server on an authentication mechanism.
+    // However, we want to specify a fixed set of authentication mechanisms here.
+    let authentication_mechanisms: Vec<_> = args
+        .auth
+        .iter()
+        .map(|mechanism| mechanism.to_uppercase())
         .collect();
 
     let authentication_mechanisms: Vec<_> = authentication_mechanisms
@@ -59,20 +85,26 @@ async fn main() {
     let mut sasl_session = {
         // Note: Depending on what we provide here, different authentication mechanisms will be supported.
         let sasl = SASLClient::new(
-            SASLConfig::with_credentials(None, "Al¹ce".into(), "Pa²²w0rd".into()).unwrap(),
+            SASLConfig::with_credentials(None, args.username.into(), args.password.into()).unwrap(),
         );
 
-        // Note: We don't enforce a specific set of algorithms here.
         sasl.start_suggested(&authentication_mechanisms).unwrap()
     };
 
     let chosen_mechanism =
         AuthMechanism::try_from(sasl_session.get_mechname().to_string()).unwrap();
+
     info!(?chosen_mechanism);
+
+    let (mut client, greeting) = ClientFlow::receive_greeting(stream, ClientFlowOptions::default())
+        .await
+        .unwrap();
+
+    info!(?greeting);
 
     let mut state = None;
 
-    let body = if sasl_session.are_we_first() && is_sasl_ir_supported {
+    let body = if sasl_session.are_we_first() && args.ir {
         let mut out = Vec::new();
         state = Some(sasl_session.step(None, &mut out).unwrap());
         CommandBody::authenticate_with_ir(chosen_mechanism, out)
