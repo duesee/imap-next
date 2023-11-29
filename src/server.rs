@@ -13,7 +13,7 @@ use thiserror::Error;
 use crate::{
     receive::{ReceiveEvent, ReceiveState},
     send::SendResponseState,
-    stream::AnyStream,
+    stream::{AnyStream, StreamError},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -238,7 +238,7 @@ pub enum ServerFlowEvent {
 #[derive(Debug, Error)]
 pub enum ServerFlowError {
     #[error(transparent)]
-    Io(#[from] tokio::io::Error),
+    Stream(#[from] StreamError),
     #[error("Expected `\\r\\n`, got `\\n`")]
     ExpectedCrlfGotLf { discarded_bytes: Box<[u8]> },
     #[error("Received malformed message")]

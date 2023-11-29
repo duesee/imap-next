@@ -1,9 +1,8 @@
 use bounded_static::IntoBoundedStatic;
 use bytes::{Buf, BytesMut};
 use imap_codec::decode::Decoder;
-use tokio::io::AsyncReadExt;
 
-use crate::stream::AnyStream;
+use crate::stream::{AnyStream, StreamError};
 
 #[derive(Debug)]
 pub struct ReceiveState<C: Decoder> {
@@ -51,10 +50,7 @@ impl<C: Decoder> ReceiveState<C> {
         self.read_buffer
     }
 
-    pub async fn progress(
-        &mut self,
-        stream: &mut AnyStream,
-    ) -> Result<ReceiveEvent<C>, tokio::io::Error>
+    pub async fn progress(&mut self, stream: &mut AnyStream) -> Result<ReceiveEvent<C>, StreamError>
     where
         for<'a> C::Message<'a>: IntoBoundedStatic<Static = C::Message<'static>>,
         for<'a> C::Error<'a>: IntoBoundedStatic<Static = C::Error<'static>>,
@@ -76,7 +72,7 @@ impl<C: Decoder> ReceiveState<C> {
     async fn progress_line(
         &mut self,
         stream: &mut AnyStream,
-    ) -> Result<Option<ReceiveEvent<C>>, tokio::io::Error>
+    ) -> Result<Option<ReceiveEvent<C>>, StreamError>
     where
         for<'a> C::Message<'a>: IntoBoundedStatic<Static = C::Message<'static>>,
         for<'a> C::Error<'a>: IntoBoundedStatic<Static = C::Error<'static>>,
@@ -87,7 +83,7 @@ impl<C: Decoder> ReceiveState<C> {
             Some(crlf_result) => crlf_result,
             None => {
                 // No full line received yet, more data needed.
-                stream.0.read_buf(&mut self.read_buffer).await?;
+                stream.read(&mut self.read_buffer).await?;
                 return Ok(None);
             }
         };
@@ -115,12 +111,12 @@ impl<C: Decoder> ReceiveState<C> {
         &mut self,
         stream: &mut AnyStream,
         literal_length: u32,
-    ) -> Result<(), tokio::io::Error> {
+    ) -> Result<(), StreamError> {
         let unseen_bytes = self.read_buffer.len() - self.seen_bytes;
 
         if unseen_bytes < literal_length as usize {
             // We did not receive enough bytes for the literal yet.
-            stream.0.read_buf(&mut self.read_buffer).await?;
+            stream.read(&mut self.read_buffer).await?;
         } else {
             // We received enough bytes for the literal.
             // Now we can continue reading the next line.

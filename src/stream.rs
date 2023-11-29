@@ -1,6 +1,8 @@
 use std::{fmt::Debug, pin::Pin};
 
-use tokio::io::{AsyncRead, AsyncWrite};
+use bytes::BytesMut;
+use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 // TODO: Reconsider this. Do we really need Stream + AnyStream? What is the smallest API that we need to expose?
 
@@ -15,4 +17,48 @@ impl AnyStream {
     pub fn new<S: Stream + 'static>(stream: S) -> Self {
         Self(Box::pin(stream))
     }
+
+    /// Transfers at least one byte from the stream into the read buffer.
+    pub async fn read(&mut self, read_buffer: &mut BytesMut) -> Result<(), StreamError> {
+        let byte_count = self.0.read_buf(read_buffer).await?;
+
+        if byte_count == 0 {
+            // The result is 0 if the stream reached "end of file" or the read buffer was already
+            // full before calling `read_buf`. Because we use an unlimited buffer we know that
+            // the first case occurred.
+            Err(StreamError::Closed)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Transfers all bytes from the write buffer into the stream.
+    pub async fn write_all(&mut self, write_buffer: &mut BytesMut) -> Result<(), StreamError> {
+        while !write_buffer.is_empty() {
+            let byte_count = self.0.write_buf(write_buffer).await?;
+
+            if byte_count == 0 {
+                // The result is 0 if the stream doesn't accept bytes anymore or the write buffer
+                // was already empty before calling `write_buf`. Because we checked the buffer
+                // we know that the first case occurred.
+                return Err(StreamError::Closed);
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// An error that occurred when reading from or write to a [`Stream`].
+#[derive(Debug, Error)]
+pub enum StreamError {
+    /// The operation failed because the stream is closed.
+    ///
+    /// We detect this by checking if the read or written byte count is 0. Whether the stream is
+    /// closed indefinitely or temporarily depend on the actual stream implementation.
+    #[error("Stream was closed")]
+    Closed,
+    /// A technical error occurred in the underlying stream.
+    #[error(transparent)]
+    Io(#[from] tokio::io::Error),
 }
