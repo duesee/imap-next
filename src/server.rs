@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicU64;
+
 use bytes::BytesMut;
 use imap_codec::{
     decode::CommandDecodeError,
@@ -11,10 +13,13 @@ use imap_codec::{
 use thiserror::Error;
 
 use crate::{
+    handle::{Handle, HandleGenerator},
     receive::{ReceiveEvent, ReceiveState},
     send::SendResponseState,
     stream::{AnyStream, StreamError},
 };
+
+static NEXT_HANDLE_GENERATOR_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServerFlowOptions {
@@ -44,7 +49,7 @@ pub struct ServerFlow {
     stream: AnyStream,
     max_literal_size: u32,
 
-    handle_generator: ServerFlowResponseHandleGenerator,
+    handle_generator: HandleGenerator,
     send_response_state: SendResponseState<ResponseCodec, Option<ServerFlowResponseHandle>>,
     receive_command_state: ReceiveState<CommandCodec>,
 
@@ -78,7 +83,7 @@ impl ServerFlow {
         let server_flow = Self {
             stream,
             max_literal_size: options.max_literal_size,
-            handle_generator: ServerFlowResponseHandleGenerator::default(),
+            handle_generator: HandleGenerator::new(&NEXT_HANDLE_GENERATOR_ID),
             send_response_state,
             receive_command_state,
             literal_accept_text: options.literal_accept_text,
@@ -94,7 +99,7 @@ impl ServerFlow {
     /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
     /// enqueued.
     pub fn enqueue_data(&mut self, data: Data<'static>) -> ServerFlowResponseHandle {
-        let handle = self.handle_generator.generate();
+        let handle = ServerFlowResponseHandle::new(self.handle_generator.generate());
         self.send_response_state
             .enqueue(Some(handle), Response::Data(data));
         handle
@@ -106,7 +111,7 @@ impl ServerFlow {
     /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
     /// enqueued.
     pub fn enqueue_status(&mut self, status: Status<'static>) -> ServerFlowResponseHandle {
-        let handle = self.handle_generator.generate();
+        let handle = ServerFlowResponseHandle::new(self.handle_generator.generate());
         self.send_response_state
             .enqueue(Some(handle), Response::Status(status));
         handle
@@ -121,7 +126,7 @@ impl ServerFlow {
         &mut self,
         cotinuation: CommandContinuationRequest<'static>,
     ) -> ServerFlowResponseHandle {
-        let handle = self.handle_generator.generate();
+        let handle = ServerFlowResponseHandle::new(self.handle_generator.generate());
         self.send_response_state.enqueue(
             Some(handle),
             Response::CommandContinuationRequest(cotinuation),
@@ -238,7 +243,13 @@ impl ServerFlow {
 /// sent until [`ServerFlow::progress`] returns a [`ServerFlowEvent::ResponseSent`] with the
 /// corresponding handle.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct ServerFlowResponseHandle(u64);
+pub struct ServerFlowResponseHandle(u64, u64);
+
+impl ServerFlowResponseHandle {
+    fn new(handle: Handle) -> Self {
+        Self(handle.0, handle.1)
+    }
+}
 
 #[derive(Debug)]
 pub enum ServerFlowEvent {
@@ -264,17 +275,4 @@ pub enum ServerFlowError {
     MalformedMessage { discarded_bytes: Box<[u8]> },
     #[error("Literal was rejected because it was too long")]
     LiteralTooLong { discarded_bytes: Box<[u8]> },
-}
-
-#[derive(Debug, Default)]
-struct ServerFlowResponseHandleGenerator {
-    counter: u64,
-}
-
-impl ServerFlowResponseHandleGenerator {
-    fn generate(&mut self) -> ServerFlowResponseHandle {
-        let handle = ServerFlowResponseHandle(self.counter);
-        self.counter += self.counter.wrapping_add(1);
-        handle
-    }
 }
