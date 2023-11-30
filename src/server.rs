@@ -130,6 +130,25 @@ impl ServerFlow {
     }
 
     pub async fn progress(&mut self) -> Result<ServerFlowEvent, ServerFlowError> {
+        // The server must do two things:
+        // - Sending responses to the client.
+        // - Receiving commands from the client.
+        //
+        // There are two ways to accomplish that:
+        // - Doing both in parallel.
+        // - Doing both consecutively.
+        //
+        // Doing both in parallel is more complicated because both operations share the same
+        // state and the borrow checker prevents the naive approach. We would need to introduce
+        // interior mutability.
+        //
+        // Doing both consecutively is easier. But in which order? Receiving commands will block
+        // indefinitely because we never know when the client is sending the next response.
+        // Sending responses will be completed in the foreseeable future because for practical
+        // purposes we can assume that the number of responses is finite and the stream will be
+        // able to transfer all bytes soon.
+        //
+        // Therefore we prefer the second approach and begin with sending the responses.
         loop {
             if let Some(event) = self.progress_response().await? {
                 return Ok(event);
