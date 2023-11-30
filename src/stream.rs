@@ -54,7 +54,7 @@ impl AnyStream {
     }
 }
 
-/// An error that occurred when reading from or write to a [`Stream`].
+/// Error during reading from or writing to a [`Stream`].
 #[derive(Debug, Error)]
 pub enum StreamError {
     /// The operation failed because the stream is closed.
