@@ -6,9 +6,8 @@ use imap_codec::{
     imap_types::command::Command,
     CommandCodec,
 };
-use tokio::io::AsyncWriteExt;
 
-use crate::stream::AnyStream;
+use crate::stream::{AnyStream, StreamError};
 
 #[derive(Debug)]
 pub struct SendCommandState<K> {
@@ -72,7 +71,7 @@ impl<K> SendCommandState<K> {
     pub async fn progress(
         &mut self,
         stream: &mut AnyStream,
-    ) -> Result<Option<(K, Command<'static>)>, tokio::io::Error> {
+    ) -> Result<Option<(K, Command<'static>)>, StreamError> {
         let progress = match self.send_progress.take() {
             Some(progress) => {
                 // We are currently sending a command to the server. This sending process was
@@ -107,7 +106,7 @@ impl<K> SendCommandState<K> {
                 progress.next_literal = Some(literal_progress);
 
                 // Make sure that the line before the literal is sent completely to the server
-                stream.0.write_all_buf(&mut self.write_buffer).await?;
+                stream.write_all(&mut self.write_buffer).await?;
 
                 return Ok(None);
             }
@@ -140,7 +139,7 @@ impl<K> SendCommandState<K> {
         };
 
         // Send the bytes of the command to the server
-        stream.0.write_all_buf(&mut self.write_buffer).await?;
+        stream.write_all(&mut self.write_buffer).await?;
 
         if need_continue {
             Ok(None)
@@ -225,7 +224,7 @@ where
     pub async fn progress(
         &mut self,
         stream: &mut AnyStream,
-    ) -> Result<Option<(K, C::Message<'static>)>, tokio::io::Error> {
+    ) -> Result<Option<(K, C::Message<'static>)>, StreamError> {
         let progress = match self.send_progress.take() {
             Some(progress) => {
                 // We are currently sending a response. This sending process was
@@ -258,7 +257,7 @@ where
         self.send_progress = Some(progress);
 
         // Send all bytes of current response
-        stream.0.write_all_buf(&mut self.write_buffer).await?;
+        stream.write_all(&mut self.write_buffer).await?;
 
         // Response was sent completely
         Ok(self

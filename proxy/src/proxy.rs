@@ -263,7 +263,7 @@ fn handle_client_event(
             error!(role = "c2p", %error, ?discarded_bytes, "Discard client message");
             return ControlFlow::Continue;
         }
-        Err(ServerFlowError::Io(error)) => {
+        Err(ServerFlowError::Stream(error)) => {
             error!(role = "c2p", %error, "Connection terminated");
             return ControlFlow::Abort;
         }
@@ -304,7 +304,7 @@ fn handle_server_event(
             error!(role = "c2p", %error, ?discarded_bytes, "Discard server message");
             return ControlFlow::Continue;
         }
-        Err(ClientFlowError::Io(error)) => {
+        Err(ClientFlowError::Stream(error)) => {
             error!(role = "s2p", %error, "Connection terminated");
             return ControlFlow::Abort;
         }
