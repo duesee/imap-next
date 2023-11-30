@@ -58,7 +58,7 @@ pub enum StreamError {
     /// closed indefinitely or temporarily depend on the actual stream implementation.
     #[error("Stream was closed")]
     Closed,
-    /// A technical error occurred in the underlying stream.
+    /// An I/O error occurred in the underlying stream.
     #[error(transparent)]
     Io(#[from] tokio::io::Error),
 }
