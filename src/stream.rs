@@ -1,4 +1,4 @@
-use std::{fmt::Debug, pin::Pin};
+use std::{fmt::Debug, num::NonZeroUsize, pin::Pin};
 
 use bytes::BytesMut;
 use thiserror::Error;
@@ -18,21 +18,26 @@ impl AnyStream {
         Self(Box::pin(stream))
     }
 
-    /// Transfers at least one byte from the stream into the read buffer.
-    pub async fn read(&mut self, read_buffer: &mut BytesMut) -> Result<(), StreamError> {
+    /// Reads at least one byte into the buffer and returns the number of read bytes.
+    ///
+    /// Returns [`StreamError::Closed`] when no bytes could be read.
+    pub async fn read(&mut self, read_buffer: &mut BytesMut) -> Result<NonZeroUsize, StreamError> {
         let byte_count = self.0.read_buf(read_buffer).await?;
 
-        if byte_count == 0 {
-            // The result is 0 if the stream reached "end of file" or the read buffer was already
-            // full before calling `read_buf`. Because we use an unlimited buffer we know that
-            // the first case occurred.
-            Err(StreamError::Closed)
-        } else {
-            Ok(())
+        match NonZeroUsize::new(byte_count) {
+            None => {
+                // The result is 0 if the stream reached "end of file" or the read buffer was
+                // already full before calling `read_buf`. Because we use an unlimited buffer we
+                // know that the first case occurred.
+                Err(StreamError::Closed)
+            }
+            Some(byte_count) => Ok(byte_count),
         }
     }
 
-    /// Transfers all bytes from the write buffer into the stream.
+    /// Writes all bytes from the write buffer.
+    ///
+    /// Returns [`StreamError::Closed`] when not all bytes could be written.
     pub async fn write_all(&mut self, write_buffer: &mut BytesMut) -> Result<(), StreamError> {
         while !write_buffer.is_empty() {
             let byte_count = self.0.write_buf(write_buffer).await?;
