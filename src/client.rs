@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use bytes::BytesMut;
 use imap_codec::{
     decode::{GreetingDecodeError, ResponseDecodeError},
@@ -13,10 +15,14 @@ use imap_codec::{
 use thiserror::Error;
 
 use crate::{
+    handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveEvent, ReceiveState},
     send::SendCommandState,
     stream::{AnyStream, StreamError},
 };
+
+static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ClientFlowCommandHandle> =
+    HandleGeneratorGenerator::new();
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClientFlowOptions {
@@ -36,7 +42,7 @@ impl Default for ClientFlowOptions {
 pub struct ClientFlow {
     stream: AnyStream,
 
-    handle_generator: ClientFlowCommandHandleGenerator,
+    handle_generator: HandleGenerator<ClientFlowCommandHandle>,
     send_command_state: SendCommandState<ClientFlowCommandHandle>,
     receive_response_state: ReceiveState<ResponseCodec>,
 }
@@ -82,7 +88,7 @@ impl ClientFlow {
 
         let client_flow = Self {
             stream,
-            handle_generator: ClientFlowCommandHandleGenerator::default(),
+            handle_generator: HANDLE_GENERATOR_GENERATOR.generate(),
             send_command_state,
             receive_response_state,
         };
@@ -218,8 +224,24 @@ impl ClientFlow {
 /// [`ClientFlow::enqueue_command`] it is in the process of being sent until
 /// [`ClientFlow::progress`] returns a [`ClientFlowEvent::CommandSent`] or
 /// [`ClientFlowEvent::CommandRejected`] with the corresponding handle.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct ClientFlowCommandHandle(u64);
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+pub struct ClientFlowCommandHandle(RawHandle);
+
+impl Handle for ClientFlowCommandHandle {
+    fn from_raw(handle: RawHandle) -> Self {
+        Self(handle)
+    }
+}
+
+// Implement a short debug representation that hides the underlying raw handle
+impl Debug for ClientFlowCommandHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ClientFlowCommandHandle")
+            .field(&self.0.generator_id())
+            .field(&self.0.handle_id())
+            .finish()
+    }
+}
 
 #[derive(Debug)]
 pub enum ClientFlowEvent {
@@ -269,17 +291,4 @@ pub enum ClientFlowError {
     ExpectedCrlfGotLf { discarded_bytes: Box<[u8]> },
     #[error("Received malformed message")]
     MalformedMessage { discarded_bytes: Box<[u8]> },
-}
-
-#[derive(Debug, Default)]
-struct ClientFlowCommandHandleGenerator {
-    counter: u64,
-}
-
-impl ClientFlowCommandHandleGenerator {
-    fn generate(&mut self) -> ClientFlowCommandHandle {
-        let handle = ClientFlowCommandHandle(self.counter);
-        self.counter += self.counter.wrapping_add(1);
-        handle
-    }
 }

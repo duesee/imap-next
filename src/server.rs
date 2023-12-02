@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use bytes::BytesMut;
 use imap_codec::{
     decode::CommandDecodeError,
@@ -11,10 +13,14 @@ use imap_codec::{
 use thiserror::Error;
 
 use crate::{
+    handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveEvent, ReceiveState},
     send::SendResponseState,
     stream::{AnyStream, StreamError},
 };
+
+static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ServerFlowResponseHandle> =
+    HandleGeneratorGenerator::new();
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServerFlowOptions {
@@ -44,7 +50,7 @@ pub struct ServerFlow {
     stream: AnyStream,
     max_literal_size: u32,
 
-    handle_generator: ServerFlowResponseHandleGenerator,
+    handle_generator: HandleGenerator<ServerFlowResponseHandle>,
     send_response_state: SendResponseState<ResponseCodec, Option<ServerFlowResponseHandle>>,
     receive_command_state: ReceiveState<CommandCodec>,
 
@@ -78,7 +84,7 @@ impl ServerFlow {
         let server_flow = Self {
             stream,
             max_literal_size: options.max_literal_size,
-            handle_generator: ServerFlowResponseHandleGenerator::default(),
+            handle_generator: HANDLE_GENERATOR_GENERATOR.generate(),
             send_response_state,
             receive_command_state,
             literal_accept_text: options.literal_accept_text,
@@ -237,8 +243,24 @@ impl ServerFlow {
 /// [`ServerFlow::enqueue_data`] or [`ServerFlow::enqueue_status`] it is in the process of being
 /// sent until [`ServerFlow::progress`] returns a [`ServerFlowEvent::ResponseSent`] with the
 /// corresponding handle.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct ServerFlowResponseHandle(u64);
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+pub struct ServerFlowResponseHandle(RawHandle);
+
+impl Handle for ServerFlowResponseHandle {
+    fn from_raw(raw_handle: RawHandle) -> Self {
+        Self(raw_handle)
+    }
+}
+
+// Implement a short debug representation that hides the underlying raw handle
+impl Debug for ServerFlowResponseHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ServerFlowResponseHandle")
+            .field(&self.0.generator_id())
+            .field(&self.0.handle_id())
+            .finish()
+    }
+}
 
 #[derive(Debug)]
 pub enum ServerFlowEvent {
@@ -264,17 +286,4 @@ pub enum ServerFlowError {
     MalformedMessage { discarded_bytes: Box<[u8]> },
     #[error("Literal was rejected because it was too long")]
     LiteralTooLong { discarded_bytes: Box<[u8]> },
-}
-
-#[derive(Debug, Default)]
-struct ServerFlowResponseHandleGenerator {
-    counter: u64,
-}
-
-impl ServerFlowResponseHandleGenerator {
-    fn generate(&mut self) -> ServerFlowResponseHandle {
-        let handle = ServerFlowResponseHandle(self.counter);
-        self.counter += self.counter.wrapping_add(1);
-        handle
-    }
 }
