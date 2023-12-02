@@ -1,4 +1,4 @@
-use std::{fmt::Debug, sync::atomic::AtomicU64};
+use std::fmt::Debug;
 
 use bytes::BytesMut;
 use imap_codec::{
@@ -15,13 +15,13 @@ use imap_codec::{
 use thiserror::Error;
 
 use crate::{
-    handle::{Handle, HandleGenerator},
+    handle::{Handle, HandleGenerator, HandleGeneratorGenerator},
     receive::{ReceiveEvent, ReceiveState},
     send::SendCommandState,
     stream::{AnyStream, StreamError},
 };
 
-static NEXT_HANDLE_GENERATOR_ID: AtomicU64 = AtomicU64::new(0);
+static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator = HandleGeneratorGenerator::new();
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClientFlowOptions {
@@ -87,7 +87,7 @@ impl ClientFlow {
 
         let client_flow = Self {
             stream,
-            handle_generator: HandleGenerator::new(&NEXT_HANDLE_GENERATOR_ID),
+            handle_generator: HANDLE_GENERATOR_GENERATOR.generate(),
             send_command_state,
             receive_response_state,
         };

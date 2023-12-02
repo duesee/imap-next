@@ -26,17 +26,6 @@ pub struct HandleGenerator {
 }
 
 impl HandleGenerator {
-    pub fn new(next_generator_id: &AtomicU64) -> Self {
-        // There is no synchronization required and we only care about each thread seeing a
-        // unique value.
-        let generator_id = next_generator_id.fetch_add(1, Ordering::Relaxed);
-
-        Self {
-            generator_id,
-            next_handle_id: 0,
-        }
-    }
-
     pub fn generate(&mut self) -> Handle {
         let handle_id = self.next_handle_id;
         self.next_handle_id += self.next_handle_id.wrapping_add(1);
@@ -44,6 +33,32 @@ impl HandleGenerator {
         Handle {
             generator_id: self.generator_id,
             handle_id,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct HandleGeneratorGenerator {
+    next_handle_generator_id: AtomicU64,
+}
+
+impl HandleGeneratorGenerator {
+    pub const fn new() -> Self {
+        Self {
+            next_handle_generator_id: AtomicU64::new(0),
+        }
+    }
+
+    pub fn generate(&self) -> HandleGenerator {
+        // There is no synchronization required and we only care about each thread seeing a
+        // unique value.
+        let generator_id = self
+            .next_handle_generator_id
+            .fetch_add(1, Ordering::Relaxed);
+
+        HandleGenerator {
+            generator_id,
+            next_handle_id: 0,
         }
     }
 }

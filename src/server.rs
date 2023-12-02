@@ -1,4 +1,4 @@
-use std::{fmt::Debug, sync::atomic::AtomicU64};
+use std::fmt::Debug;
 
 use bytes::BytesMut;
 use imap_codec::{
@@ -13,13 +13,13 @@ use imap_codec::{
 use thiserror::Error;
 
 use crate::{
-    handle::{Handle, HandleGenerator},
+    handle::{Handle, HandleGenerator, HandleGeneratorGenerator},
     receive::{ReceiveEvent, ReceiveState},
     send::SendResponseState,
     stream::{AnyStream, StreamError},
 };
 
-static NEXT_HANDLE_GENERATOR_ID: AtomicU64 = AtomicU64::new(0);
+static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator = HandleGeneratorGenerator::new();
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServerFlowOptions {
@@ -83,7 +83,7 @@ impl ServerFlow {
         let server_flow = Self {
             stream,
             max_literal_size: options.max_literal_size,
-            handle_generator: HandleGenerator::new(&NEXT_HANDLE_GENERATOR_ID),
+            handle_generator: HANDLE_GENERATOR_GENERATOR.generate(),
             send_response_state,
             receive_command_state,
             literal_accept_text: options.literal_accept_text,
