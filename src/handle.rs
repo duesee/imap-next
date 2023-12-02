@@ -1,7 +1,20 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-#[derive(Debug)]
-pub struct Handle(pub u64, pub u64);
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct Handle {
+    generator_id: u64,
+    handle_id: u64,
+}
+
+impl Handle {
+    pub fn generator_id(&self) -> u64 {
+        self.generator_id
+    }
+
+    pub fn handle_id(&self) -> u64 {
+        self.handle_id
+    }
+}
 
 #[derive(Debug)]
 pub struct HandleGenerator {
@@ -28,6 +41,9 @@ impl HandleGenerator {
         let handle_id = self.next_handle_id;
         self.next_handle_id += self.next_handle_id.wrapping_add(1);
 
-        Handle(self.generator_id, handle_id)
+        Handle {
+            generator_id: self.generator_id,
+            handle_id,
+        }
     }
 }

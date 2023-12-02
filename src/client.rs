@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicU64;
+use std::{fmt::Debug, sync::atomic::AtomicU64};
 
 use bytes::BytesMut;
 use imap_codec::{
@@ -101,7 +101,7 @@ impl ClientFlow {
     /// [`ClientFlow::progress`]. All [`Command`]s are sent in the same order they have been
     /// enqueued.
     pub fn enqueue_command(&mut self, command: Command<'static>) -> ClientFlowCommandHandle {
-        let handle = ClientFlowCommandHandle::new(self.handle_generator.generate());
+        let handle = ClientFlowCommandHandle(self.handle_generator.generate());
         self.send_command_state.enqueue(handle, command);
         handle
     }
@@ -223,12 +223,15 @@ impl ClientFlow {
 /// [`ClientFlow::enqueue_command`] it is in the process of being sent until
 /// [`ClientFlow::progress`] returns a [`ClientFlowEvent::CommandSent`] or
 /// [`ClientFlowEvent::CommandRejected`] with the corresponding handle.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct ClientFlowCommandHandle(u64, u64);
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+pub struct ClientFlowCommandHandle(Handle);
 
-impl ClientFlowCommandHandle {
-    fn new(handle: Handle) -> Self {
-        Self(handle.0, handle.1)
+impl Debug for ClientFlowCommandHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ClientFlowCommandHandle")
+            .field(&self.0.generator_id())
+            .field(&self.0.handle_id())
+            .finish()
     }
 }
 

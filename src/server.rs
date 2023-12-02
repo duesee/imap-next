@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicU64;
+use std::{fmt::Debug, sync::atomic::AtomicU64};
 
 use bytes::BytesMut;
 use imap_codec::{
@@ -99,7 +99,7 @@ impl ServerFlow {
     /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
     /// enqueued.
     pub fn enqueue_data(&mut self, data: Data<'static>) -> ServerFlowResponseHandle {
-        let handle = ServerFlowResponseHandle::new(self.handle_generator.generate());
+        let handle = ServerFlowResponseHandle(self.handle_generator.generate());
         self.send_response_state
             .enqueue(Some(handle), Response::Data(data));
         handle
@@ -111,7 +111,7 @@ impl ServerFlow {
     /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
     /// enqueued.
     pub fn enqueue_status(&mut self, status: Status<'static>) -> ServerFlowResponseHandle {
-        let handle = ServerFlowResponseHandle::new(self.handle_generator.generate());
+        let handle = ServerFlowResponseHandle(self.handle_generator.generate());
         self.send_response_state
             .enqueue(Some(handle), Response::Status(status));
         handle
@@ -126,7 +126,7 @@ impl ServerFlow {
         &mut self,
         cotinuation: CommandContinuationRequest<'static>,
     ) -> ServerFlowResponseHandle {
-        let handle = ServerFlowResponseHandle::new(self.handle_generator.generate());
+        let handle = ServerFlowResponseHandle(self.handle_generator.generate());
         self.send_response_state.enqueue(
             Some(handle),
             Response::CommandContinuationRequest(cotinuation),
@@ -242,12 +242,15 @@ impl ServerFlow {
 /// [`ServerFlow::enqueue_data`] or [`ServerFlow::enqueue_status`] it is in the process of being
 /// sent until [`ServerFlow::progress`] returns a [`ServerFlowEvent::ResponseSent`] with the
 /// corresponding handle.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct ServerFlowResponseHandle(u64, u64);
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+pub struct ServerFlowResponseHandle(Handle);
 
-impl ServerFlowResponseHandle {
-    fn new(handle: Handle) -> Self {
-        Self(handle.0, handle.1)
+impl Debug for ServerFlowResponseHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ServerFlowResponseHandle")
+            .field(&self.0.generator_id())
+            .field(&self.0.handle_id())
+            .finish()
     }
 }
 
