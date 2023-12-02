@@ -13,14 +13,14 @@ use imap_codec::{
 use thiserror::Error;
 
 use crate::{
-    handle::{HandleGenerator, HandleGeneratorGenerator, RawHandle},
+    handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveEvent, ReceiveState},
     send::SendResponseState,
     stream::{AnyStream, StreamError},
 };
 
 static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ServerFlowResponseHandle> =
-    HandleGeneratorGenerator::new(ServerFlowResponseHandle);
+    HandleGeneratorGenerator::new();
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServerFlowOptions {
@@ -245,6 +245,12 @@ impl ServerFlow {
 /// corresponding handle.
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct ServerFlowResponseHandle(RawHandle);
+
+impl Handle for ServerFlowResponseHandle {
+    fn from_raw(raw_handle: RawHandle) -> Self {
+        Self(raw_handle)
+    }
+}
 
 impl Debug for ServerFlowResponseHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
