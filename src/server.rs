@@ -13,13 +13,14 @@ use imap_codec::{
 use thiserror::Error;
 
 use crate::{
-    handle::{Handle, HandleGenerator, HandleGeneratorGenerator},
+    handle::{HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveEvent, ReceiveState},
     send::SendResponseState,
     stream::{AnyStream, StreamError},
 };
 
-static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator = HandleGeneratorGenerator::new();
+static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ServerFlowResponseHandle> =
+    HandleGeneratorGenerator::new(ServerFlowResponseHandle);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServerFlowOptions {
@@ -49,7 +50,7 @@ pub struct ServerFlow {
     stream: AnyStream,
     max_literal_size: u32,
 
-    handle_generator: HandleGenerator,
+    handle_generator: HandleGenerator<ServerFlowResponseHandle>,
     send_response_state: SendResponseState<ResponseCodec, Option<ServerFlowResponseHandle>>,
     receive_command_state: ReceiveState<CommandCodec>,
 
@@ -99,7 +100,7 @@ impl ServerFlow {
     /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
     /// enqueued.
     pub fn enqueue_data(&mut self, data: Data<'static>) -> ServerFlowResponseHandle {
-        let handle = ServerFlowResponseHandle(self.handle_generator.generate());
+        let handle = self.handle_generator.generate();
         self.send_response_state
             .enqueue(Some(handle), Response::Data(data));
         handle
@@ -111,7 +112,7 @@ impl ServerFlow {
     /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
     /// enqueued.
     pub fn enqueue_status(&mut self, status: Status<'static>) -> ServerFlowResponseHandle {
-        let handle = ServerFlowResponseHandle(self.handle_generator.generate());
+        let handle = self.handle_generator.generate();
         self.send_response_state
             .enqueue(Some(handle), Response::Status(status));
         handle
@@ -126,7 +127,7 @@ impl ServerFlow {
         &mut self,
         cotinuation: CommandContinuationRequest<'static>,
     ) -> ServerFlowResponseHandle {
-        let handle = ServerFlowResponseHandle(self.handle_generator.generate());
+        let handle = self.handle_generator.generate();
         self.send_response_state.enqueue(
             Some(handle),
             Response::CommandContinuationRequest(cotinuation),
@@ -243,7 +244,7 @@ impl ServerFlow {
 /// sent until [`ServerFlow::progress`] returns a [`ServerFlowEvent::ResponseSent`] with the
 /// corresponding handle.
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
-pub struct ServerFlowResponseHandle(Handle);
+pub struct ServerFlowResponseHandle(RawHandle);
 
 impl Debug for ServerFlowResponseHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -15,13 +15,14 @@ use imap_codec::{
 use thiserror::Error;
 
 use crate::{
-    handle::{Handle, HandleGenerator, HandleGeneratorGenerator},
+    handle::{HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveEvent, ReceiveState},
     send::SendCommandState,
     stream::{AnyStream, StreamError},
 };
 
-static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator = HandleGeneratorGenerator::new();
+static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ClientFlowCommandHandle> =
+    HandleGeneratorGenerator::new(ClientFlowCommandHandle);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClientFlowOptions {
@@ -41,7 +42,7 @@ impl Default for ClientFlowOptions {
 pub struct ClientFlow {
     stream: AnyStream,
 
-    handle_generator: HandleGenerator,
+    handle_generator: HandleGenerator<ClientFlowCommandHandle>,
     send_command_state: SendCommandState<ClientFlowCommandHandle>,
     receive_response_state: ReceiveState<ResponseCodec>,
 }
@@ -101,7 +102,7 @@ impl ClientFlow {
     /// [`ClientFlow::progress`]. All [`Command`]s are sent in the same order they have been
     /// enqueued.
     pub fn enqueue_command(&mut self, command: Command<'static>) -> ClientFlowCommandHandle {
-        let handle = ClientFlowCommandHandle(self.handle_generator.generate());
+        let handle = self.handle_generator.generate();
         self.send_command_state.enqueue(handle, command);
         handle
     }
@@ -224,7 +225,7 @@ impl ClientFlow {
 /// [`ClientFlow::progress`] returns a [`ClientFlowEvent::CommandSent`] or
 /// [`ClientFlowEvent::CommandRejected`] with the corresponding handle.
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
-pub struct ClientFlowCommandHandle(Handle);
+pub struct ClientFlowCommandHandle(RawHandle);
 
 impl Debug for ClientFlowCommandHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
