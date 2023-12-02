@@ -233,6 +233,7 @@ impl Handle for ClientFlowCommandHandle {
     }
 }
 
+// Implement a short debug representation that hides the underlying raw handle
 impl Debug for ClientFlowCommandHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ClientFlowCommandHandle")
