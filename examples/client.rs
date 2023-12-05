@@ -49,6 +49,10 @@ async fn main() {
             ClientFlowEvent::ContinuationReceived { continuation } => {
                 println!("unexpected continuation received: {continuation:?}");
             }
+            // TODO
+            event => {
+                println!("{event:?}");
+            }
         }
     }
 }

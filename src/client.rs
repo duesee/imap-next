@@ -4,7 +4,8 @@ use bytes::BytesMut;
 use imap_codec::{
     decode::{GreetingDecodeError, ResponseDecodeError},
     imap_types::{
-        command::Command,
+        auth::AuthenticateData,
+        command::{Command, CommandBody},
         response::{
             CommandContinuationRequest, Data, Greeting, Response, Status, StatusBody, StatusKind,
             Tagged,
@@ -102,6 +103,12 @@ impl ClientFlow {
     /// [`ClientFlow::progress`]. All [`Command`]s are sent in the same order they have been
     /// enqueued.
     pub fn enqueue_command(&mut self, command: Command<'static>) -> ClientFlowCommandHandle {
+        if let CommandBody::Authenticate { .. } = command.body {
+            // TODO: Remember that we send the AUTHENTICATE.
+            // The server will request additional data (if required).
+            todo!()
+        }
+
         let handle = self.handle_generator.generate();
         self.send_command_state.enqueue(handle, command);
         handle
@@ -216,6 +223,10 @@ impl ClientFlow {
             _ => None,
         }
     }
+
+    pub fn authenticate_continue(&mut self, _: AuthenticateData) {
+        todo!()
+    }
 }
 
 /// A handle for an enqueued [`Command`].
@@ -245,12 +256,26 @@ impl Debug for ClientFlowCommandHandle {
 
 #[derive(Debug)]
 pub enum ClientFlowEvent {
+    /// Server is requesting (more) authentication data.
+    /// TODO: This could also be encoded in ContinuationReceived (see below).
+    AuthenticationContinue {
+        /// Handle to the enqueued [`Command`].
+        handle: ClientFlowCommandHandle,
+        continuation: CommandContinuationRequest<'static>,
+    },
+    // TODO: handle, command, ...
+    AuthenticationAccepted,
+    // TODO: handle, command, ...
+    AuthenticationRejected,
     /// Enqueued [`Command`] successfully sent.
     CommandSent {
         /// Handle to the enqueued [`Command`].
         handle: ClientFlowCommandHandle,
         /// Formerly enqueued [`Command`].
         command: Command<'static>,
+        // TODO:
+        // more_data: ...
+        // status: Option<Status<'static>>,
     },
     /// Enqueued [`Command`] rejected.
     ///
@@ -268,9 +293,13 @@ pub enum ClientFlowEvent {
         status: Status<'static>,
     },
     /// Server [`Data`] received.
-    DataReceived { data: Data<'static> },
+    DataReceived {
+        data: Data<'static>,
+    },
     /// Server [`Status`] received.
-    StatusReceived { status: Status<'static> },
+    StatusReceived {
+        status: Status<'static>,
+    },
     /// Server [`CommandContinuationRequest`] response received.
     ///
     /// Note: The received continuation was not part of [`ClientFlow`] literal handling.
@@ -279,9 +308,26 @@ pub enum ClientFlowEvent {
     /// * an acknowledgement to proceed with IDLE,
     /// * or an unsolicited continuation (in which case processing is deferred to the user).
     ContinuationReceived {
+        // TODO: Add a context instead?
+        // context: ContinuationContext,
         continuation: CommandContinuationRequest<'static>,
     },
 }
+
+// TODO
+/*
+pub enum ContinuationContext {
+    Unknown,
+    Authenticate {
+        handle: ClientFlowCommandHandle,
+        tag: Tag<'static>,
+    },
+    Idle {
+        handle: ClientFlowCommandHandle,
+        tag: Tag<'static>,
+    },
+}
+*/
 
 #[derive(Debug, Error)]
 pub enum ClientFlowError {

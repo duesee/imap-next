@@ -4,9 +4,11 @@ use bytes::BytesMut;
 use imap_codec::{
     decode::CommandDecodeError,
     imap_types::{
+        auth::{AuthMechanism, AuthenticateData},
         command::Command,
-        core::Text,
+        core::{Tag, Text},
         response::{CommandContinuationRequest, Data, Greeting, Response, Status},
+        secret::Secret,
     },
     CommandCodec, GreetingCodec, ResponseCodec,
 };
@@ -235,6 +237,18 @@ impl ServerFlow {
             }
         }
     }
+
+    pub fn authenticate_reject(&mut self, _: Status<'static>) {
+        todo!()
+    }
+
+    pub fn authenticate_continue(&mut self, _: CommandContinuationRequest<'static>) {
+        todo!()
+    }
+
+    pub fn authenticate_finish(&mut self, _: Status<'static>) {
+        todo!()
+    }
 }
 
 /// A handle for an enqueued [`Response`].
@@ -264,6 +278,9 @@ impl Debug for ServerFlowResponseHandle {
 
 #[derive(Debug)]
 pub enum ServerFlowEvent {
+    CommandReceived {
+        command: Command<'static>,
+    },
     /// The enqueued [`Response`] was sent successfully.
     ResponseSent {
         /// The handle of the enqueued [`Response`].
@@ -271,8 +288,17 @@ pub enum ServerFlowEvent {
         /// Formerly enqueued [`Response`] that was now sent.
         response: Response<'static>,
     },
-    CommandReceived {
-        command: Command<'static>,
+    // TODO: This was inlined from `Command` (tag) + `CommandBody::Authenticate` (mechanism + initial_response).
+    AuthenticationStart {
+        tag: Tag<'static>,
+        mechanism: AuthMechanism<'static>,
+        initial_response: Option<Secret<Vec<u8>>>,
+    },
+    // Note: This can either mean `Continue` or `Cancel` depending on `auth_data`.
+    AuthenticationProgress {
+        // Tag also required here ...
+        tag: Tag<'static>,
+        auth_data: AuthenticateData,
     },
 }
 
