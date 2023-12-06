@@ -8,7 +8,7 @@ use std::{
 use imap_codec::imap_types::{
     command::{Command, CommandBody},
     core::Tag,
-    response::{Bye, CommandContinuationRequest, Data, Response, Status, StatusBody, Tagged},
+    response::{Bye, CommandContinuationRequest, Data, Response, Status, StatusBody, Tagged}, auth::AuthenticateData,
 };
 use imap_flow::client::{ClientFlow, ClientFlowCommandHandle, ClientFlowError, ClientFlowEvent};
 use tag_generator::TagGenerator;
@@ -49,12 +49,12 @@ pub trait Task: 'static {
     }
 
     /// Process an command continuation request response.
-    fn process_continuation(
+    fn process_authentication_continuation(
         &mut self,
         continuation: CommandContinuationRequest<'static>,
-    ) -> Option<CommandContinuationRequest<'static>> {
+    ) -> Result<AuthenticateData, CommandContinuationRequest<'static>> {
         // Default: Don't process command continuation request response
-        Some(continuation)
+        Err(continuation)
     }
 
     /// Process bye response.
@@ -114,6 +114,33 @@ impl Scheduler {
             let event = self.flow.progress().await?;
 
             match event {
+                AuthenticationContinue {
+                    handle,
+                    continuation,
+                } => {
+                    let authenticate_data = task.process(continuation);
+                    self.flow.authenticate_continue(authenticate_data)
+                }
+                AuthenticationAccepted {
+                    handle,
+                    tag,
+                    mechanism,
+                    initial_response,
+                    authenticate_data,
+                    status,
+                } => {
+                    todo!()
+                }
+                AuthenticationRejected {
+                    handle,
+                    tag,
+                    mechanism,
+                    initial_response,
+                    authenticate_data,
+                    status,
+                } => {
+                    todo!()
+                }
                 ClientFlowEvent::CommandSent { handle, command } => {
                     // This `unwrap` can't fail because `waiting_tasks` contains all unsent `Commands`.
                     let entry = self.waiting_tasks.remove(&handle).unwrap();
@@ -350,7 +377,7 @@ where
         &mut self,
         continuation: CommandContinuationRequest<'static>,
     ) -> Option<CommandContinuationRequest<'static>> {
-        T::process_continuation(self, continuation)
+        T::process_authentication_continuation(self, continuation)
     }
 
     fn process_bye(&mut self, bye: Bye<'static>) -> Option<Bye<'static>> {

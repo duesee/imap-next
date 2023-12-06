@@ -1,15 +1,17 @@
-use std::fmt::Debug;
+use std::{borrow::Cow, fmt::Debug};
 
 use bytes::BytesMut;
 use imap_codec::{
     decode::{GreetingDecodeError, ResponseDecodeError},
     imap_types::{
-        auth::AuthenticateData,
+        auth::{AuthMechanism, AuthenticateData},
         command::{Command, CommandBody},
+        core::Tag,
         response::{
             CommandContinuationRequest, Data, Greeting, Response, Status, StatusBody, StatusKind,
             Tagged,
         },
+        secret::Secret,
     },
     CommandCodec, GreetingCodec, ResponseCodec,
 };
@@ -18,7 +20,7 @@ use thiserror::Error;
 use crate::{
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveEvent, ReceiveState},
-    send::SendCommandState,
+    send::{SendCommandKind, SendCommandState},
     stream::{AnyStream, StreamError},
 };
 
@@ -188,6 +190,41 @@ impl ClientFlow {
                             command,
                             status,
                         });
+                    } else if let Some(result) = self.maybe_finish_authenticate(&status) {
+                        match result {
+                            FinishAuthenticateResult::Accepted {
+                                handle,
+                                tag,
+                                mechanism,
+                                initial_response,
+                                authenticate_data,
+                            } => {
+                                break Some(ClientFlowEvent::AuthenticationAccepted {
+                                    handle,
+                                    tag,
+                                    mechanism,
+                                    initial_response,
+                                    authenticate_data,
+                                    status,
+                                });
+                            }
+                            FinishAuthenticateResult::Rejected {
+                                handle,
+                                tag,
+                                mechanism,
+                                initial_response,
+                                authenticate_data,
+                            } => {
+                                break Some(ClientFlowEvent::AuthenticationRejected {
+                                    handle,
+                                    tag,
+                                    mechanism,
+                                    initial_response,
+                                    authenticate_data,
+                                    status,
+                                });
+                            }
+                        }
                     } else {
                         break Some(ClientFlowEvent::StatusReceived { status });
                     }
@@ -196,6 +233,11 @@ impl ClientFlow {
                 Response::CommandContinuationRequest(continuation) => {
                     if self.send_command_state.continue_command() {
                         break None;
+                    } else if let Some(handle) = self.send_command_state.continue_authenticate() {
+                        break Some(ClientFlowEvent::AuthenticationContinue {
+                            handle,
+                            continuation,
+                        });
                     } else {
                         break Some(ClientFlowEvent::ContinuationReceived { continuation });
                     }
@@ -224,9 +266,35 @@ impl ClientFlow {
         }
     }
 
-    pub fn authenticate_continue(&mut self, _: AuthenticateData) {
+    fn maybe_finish_authenticate(&mut self, status: &Status) -> Option<FinishAuthenticateResult> {
         todo!()
     }
+
+    pub fn authenticate_continue(
+        &mut self,
+        authenticate_data: AuthenticateData,
+    ) -> Result<ClientFlowCommandHandle, AuthenticateData> {
+        self.send_command_state
+            .continue_authenticate_with_data(authenticate_data)
+    }
+}
+
+enum FinishAuthenticateResult {
+    Accepted {
+        handle: ClientFlowCommandHandle,
+        tag: Tag<'static>,
+        mechanism: AuthMechanism<'static>,
+        initial_response: Option<Secret<Cow<'static, [u8]>>>,
+        authenticate_data: Vec<AuthenticateData>,
+    },
+    // TODO: handle, command, ...
+    Rejected {
+        handle: ClientFlowCommandHandle,
+        tag: Tag<'static>,
+        mechanism: AuthMechanism<'static>,
+        initial_response: Option<Secret<Cow<'static, [u8]>>>,
+        authenticate_data: Vec<AuthenticateData>,
+    },
 }
 
 /// A handle for an enqueued [`Command`].
@@ -264,9 +332,23 @@ pub enum ClientFlowEvent {
         continuation: CommandContinuationRequest<'static>,
     },
     // TODO: handle, command, ...
-    AuthenticationAccepted,
+    AuthenticationAccepted {
+        handle: ClientFlowCommandHandle,
+        tag: Tag<'static>,
+        mechanism: AuthMechanism<'static>,
+        initial_response: Option<Secret<Cow<'static, [u8]>>>,
+        authenticate_data: Vec<AuthenticateData>,
+        status: Status<'static>,
+    },
     // TODO: handle, command, ...
-    AuthenticationRejected,
+    AuthenticationRejected {
+        handle: ClientFlowCommandHandle,
+        tag: Tag<'static>,
+        mechanism: AuthMechanism<'static>,
+        initial_response: Option<Secret<Cow<'static, [u8]>>>,
+        authenticate_data: Vec<AuthenticateData>,
+        status: Status<'static>,
+    },
     /// Enqueued [`Command`] successfully sent.
     CommandSent {
         /// Handle to the enqueued [`Command`].
@@ -293,13 +375,9 @@ pub enum ClientFlowEvent {
         status: Status<'static>,
     },
     /// Server [`Data`] received.
-    DataReceived {
-        data: Data<'static>,
-    },
+    DataReceived { data: Data<'static> },
     /// Server [`Status`] received.
-    StatusReceived {
-        status: Status<'static>,
-    },
+    StatusReceived { status: Status<'static> },
     /// Server [`CommandContinuationRequest`] response received.
     ///
     /// Note: The received continuation was not part of [`ClientFlow`] literal handling.
@@ -307,6 +385,7 @@ pub enum ClientFlowEvent {
     /// * an acknowledgement to send authentication data,
     /// * an acknowledgement to proceed with IDLE,
     /// * or an unsolicited continuation (in which case processing is deferred to the user).
+    // TODO remove?
     ContinuationReceived {
         // TODO: Add a context instead?
         // context: ContinuationContext,

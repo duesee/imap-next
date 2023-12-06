@@ -1,10 +1,15 @@
-use std::{collections::VecDeque, fmt::Debug};
+use std::{borrow::Cow, collections::VecDeque, fmt::Debug};
 
 use bytes::BytesMut;
 use imap_codec::{
     encode::{Encoder, Fragment},
-    imap_types::command::Command,
-    CommandCodec,
+    imap_types::{
+        auth::{AuthMechanism, AuthenticateData},
+        command::{Command, CommandBody},
+        core::Tag,
+        secret::Secret,
+    },
+    AuthenticateDataCodec, CommandCodec,
 };
 
 use crate::stream::{AnyStream, StreamError};
@@ -32,21 +37,42 @@ impl<K> SendCommandState<K> {
     }
 
     pub fn enqueue(&mut self, key: K, command: Command<'static>) {
-        self.send_queue
-            .push_back(SendCommandQueueEntry { key, command });
+        let fragments = self.codec.encode(&command).collect();
+        let kind = match command.body {
+            CommandBody::Authenticate {
+                mechanism,
+                initial_response,
+            } => SendCommandKind::Authenticate {
+                tag: command.tag,
+                mechanism,
+                initial_response,
+            },
+            body => SendCommandKind::Normal {
+                command: Command {
+                    tag: command.tag,
+                    body,
+                },
+            },
+        };
+        self.send_queue.push_back(SendCommandQueueEntry {
+            key,
+            kind,
+            fragments,
+        });
     }
 
-    pub fn command_in_progress(&self) -> Option<&Command<'static>> {
-        self.send_progress.as_ref().map(|x| &x.command)
+    pub fn command_in_progress(&self) -> Option<&SendCommandKind> {
+        self.send_progress.as_ref().map(|x| &x.kind)
     }
 
-    pub fn abort_command(&mut self) -> Option<(K, Command<'static>)> {
+    pub fn abort_command(&mut self) -> Option<(K, SendCommandKind)> {
         self.write_buffer.clear();
         self.send_progress
             .take()
-            .map(|progress| (progress.key, progress.command))
+            .map(|progress| (progress.key, progress.kind))
     }
 
+    // TODO rename
     pub fn continue_command(&mut self) -> bool {
         let Some(write_progress) = self.send_progress.as_mut() else {
             return false;
@@ -54,13 +80,66 @@ impl<K> SendCommandState<K> {
         let Some(literal_progress) = write_progress.next_literal.as_mut() else {
             return false;
         };
-        if literal_progress.received_continue {
+        let SendCommandLiteralProgress::Normal {
+            received_continue, ..
+        } = literal_progress
+        else {
+            return false;
+        };
+        if *received_continue {
             return false;
         }
 
-        literal_progress.received_continue = true;
+        *received_continue = true;
 
         true
+    }
+
+    pub fn continue_authenticate(&mut self) -> Option<K> {
+        let write_progress = self.send_progress.as_mut()?;
+        let literal_progress = write_progress.next_literal.as_mut()?;
+        let SendCommandLiteralProgress::Authenticate {
+            received_continue, ..
+        } = literal_progress
+        else {
+            return None;
+        };
+        if *received_continue {
+            return None;
+        }
+
+        *received_continue = true;
+
+        Some(write_progress.key)
+    }
+
+    pub fn continue_authenticate_with_data(
+        &mut self,
+        authenticate_data: AuthenticateData,
+    ) -> Result<K, AuthenticateData> {
+        let Some(write_progress) = self.send_progress.as_mut() else {
+            return Err(authenticate_data);
+        };
+        let Some(literal_progress) = write_progress.next_literal.as_mut() else {
+            return Err(authenticate_data);
+        };
+        let SendCommandLiteralProgress::Authenticate {
+            received_continue,
+            data,
+        } = literal_progress
+        else {
+            return Err(authenticate_data);
+        };
+        if !*received_continue {
+            return Err(authenticate_data);
+        }
+        if data.is_some() {
+            return Err(authenticate_data);
+        }
+
+        *data = Some(authenticate_data);
+
+        Ok(write_progress.key)
     }
 
     pub async fn progress(
@@ -81,31 +160,67 @@ impl<K> SendCommandState<K> {
                 };
 
                 // Start sending the next command
-                let next_fragments = self.codec.encode(&entry.command).collect();
-
                 SendCommandProgress {
                     key: entry.key,
-                    command: entry.command,
+                    kind: entry.kind,
                     next_literal: None,
-                    next_fragments,
+                    next_fragments: entry.fragments,
                 }
             }
         };
         let progress = self.send_progress.insert(progress);
 
         // Handle the outstanding literal first if there is one
-        if let Some(literal_progress) = progress.next_literal.take() {
-            if literal_progress.received_continue {
-                // We received a `Continue` from the server, we can send the literal now
-                self.write_buffer.extend(literal_progress.data);
-            } else {
-                // Delay this literal because we still wait for the `Continue` from the server
-                progress.next_literal = Some(literal_progress);
+        if let Some(next_literal) = progress.next_literal.take() {
+            match next_literal {
+                SendCommandLiteralProgress::Normal {
+                    data,
+                    received_continue,
+                } => {
+                    if received_continue {
+                        // We received a `Continue` from the server, we can send the literal now
+                        self.write_buffer.extend(data);
+                    } else {
+                        // Delay this literal because we still wait for the `Continue` from the server
+                        progress.next_literal = Some(SendCommandLiteralProgress::Normal {
+                            data,
+                            received_continue,
+                        });
 
-                // Make sure that the line before the literal is sent completely to the server
-                stream.write_all(&mut self.write_buffer).await?;
+                        // Make sure that the line before the literal is sent completely to the server
+                        stream.write_all(&mut self.write_buffer).await?;
 
-                return Ok(None);
+                        return Ok(None);
+                    }
+                }
+                SendCommandLiteralProgress::Authenticate {
+                    received_continue,
+                    data,
+                } => {
+                    match data {
+                        Some(data) => {
+                            // We received a `Continue` from the server, we can send the literal now
+                            // TODO remove encode
+                            // TODO cancel?
+                            self.write_buffer
+                                .extend(AuthenticateDataCodec::new().encode(&data).dump());
+                        }
+                        None => {
+                            // The data can only be set after receiving a continue from server
+                            assert!(received_continue);
+
+                            // Delay this because we still wait for the client flow user to call
+                            // `authenticate_continue`.
+                            progress.next_literal =
+                                Some(SendCommandLiteralProgress::Authenticate {
+                                    received_continue,
+                                    data,
+                                });
+
+                            return Ok(None);
+                        }
+                    }
+                }
             }
         }
 
@@ -120,7 +235,7 @@ impl<K> SendCommandState<K> {
                         // TODO: Handle `LITERAL{+,-}`.
                         // Delay this literal because we need to wait for a `Continue` from
                         // the server
-                        progress.next_literal = Some(SendCommandLiteralProgress {
+                        progress.next_literal = Some(SendCommandLiteralProgress::Normal {
                             data,
                             received_continue: false,
                         });
@@ -141,37 +256,77 @@ impl<K> SendCommandState<K> {
         if need_continue {
             Ok(None)
         } else {
-            // Command was sent completely
-            Ok(self
-                .send_progress
-                .take()
-                .map(|progress| (progress.key, progress.command)))
+            let Some(progress) = self.send_progress.take() else {
+                return Ok(None);
+            };
+
+            match progress.kind {
+                SendCommandKind::Normal { command } => {
+                    // Command was sent completely
+                    Ok(Some((progress.key, command)))
+                }
+                kind @ SendCommandKind::Authenticate { .. } => {
+                    // Authenticate is only treated as completed after receiving a "OK" from server
+                    self.send_progress = Some(SendCommandProgress {
+                        kind,
+                        next_literal: Some(SendCommandLiteralProgress::Authenticate {
+                            received_continue: false,
+                            data: None,
+                        }),
+                        ..progress
+                    });
+                    Ok(None)
+                }
+            }
         }
     }
+}
+
+// TODO better name
+#[derive(Debug)]
+pub enum SendCommandKind {
+    Normal {
+        command: Command<'static>,
+    },
+    Authenticate {
+        tag: Tag<'static>,
+        mechanism: AuthMechanism<'static>,
+        initial_response: Option<Secret<Cow<'static, [u8]>>>,
+    },
 }
 
 #[derive(Debug)]
 struct SendCommandQueueEntry<K> {
     key: K,
-    command: Command<'static>,
+    kind: SendCommandKind,
+    fragments: VecDeque<Fragment>,
 }
 
 #[derive(Debug)]
 struct SendCommandProgress<K> {
     key: K,
-    command: Command<'static>,
+    kind: SendCommandKind,
     // If defined this literal need to be sent before `next_fragments`.
     next_literal: Option<SendCommandLiteralProgress>,
     // The fragments that need to be sent.
     next_fragments: VecDeque<Fragment>,
 }
 
+// TODO better name
 #[derive(Debug)]
-struct SendCommandLiteralProgress {
-    // The bytes of the literal.
-    data: Vec<u8>,
-    // Was the literal already acknowledged by a `Continue` from the server?
-    received_continue: bool,
+enum SendCommandLiteralProgress {
+    Normal {
+        // The bytes of the literal.
+        data: Vec<u8>,
+        // Was the literal already acknowledged by a `Continue` from the server?
+        received_continue: bool,
+    },
+    Authenticate {
+        // Was the authenticate data already requested by the server?
+        received_continue: bool,
+        // The authenticate data provided by the client flow user.
+        data: Option<AuthenticateData>,
+    },
 }
 
 #[derive(Debug)]
