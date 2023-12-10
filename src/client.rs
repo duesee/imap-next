@@ -1,17 +1,15 @@
-use std::{borrow::Cow, fmt::Debug};
+use std::fmt::Debug;
 
 use bytes::BytesMut;
 use imap_codec::{
     decode::{GreetingDecodeError, ResponseDecodeError},
     imap_types::{
-        auth::{AuthMechanism, AuthenticateData},
+        auth::AuthenticateData,
         command::{Command, CommandBody},
-        core::Tag,
         response::{
             CommandContinuationRequest, Data, Greeting, Response, Status, StatusBody, StatusKind,
             Tagged,
         },
-        secret::Secret,
     },
     CommandCodec, GreetingCodec, ResponseCodec,
 };
@@ -22,6 +20,7 @@ use crate::{
     receive::{ReceiveEvent, ReceiveState},
     send::{SendCommandKind, SendCommandState},
     stream::{AnyStream, StreamError},
+    types::AuthenticateCommandData,
 };
 
 static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ClientFlowCommandHandle> =
@@ -184,56 +183,45 @@ impl ClientFlow {
 
             match response {
                 Response::Status(status) => {
-                    if let Some((handle, command)) = self.maybe_abort_command(&status) {
-                        break Some(ClientFlowEvent::CommandRejected {
-                            handle,
-                            command,
-                            status,
-                        });
-                    } else if let Some(result) = self.maybe_finish_authenticate(&status) {
-                        match result {
-                            FinishAuthenticateResult::Accepted {
-                                handle,
-                                tag,
-                                mechanism,
-                                initial_response,
-                                authenticate_data,
-                            } => {
-                                break Some(ClientFlowEvent::AuthenticationAccepted {
+                    let event = if let Some(finish_result) = self.maybe_finish_command(&status) {
+                        match finish_result {
+                            FinishCommandResult::LiteralRejected { handle, command } => {
+                                ClientFlowEvent::CommandRejected {
                                     handle,
-                                    tag,
-                                    mechanism,
-                                    initial_response,
-                                    authenticate_data,
+                                    command,
                                     status,
-                                });
+                                }
                             }
-                            FinishAuthenticateResult::Rejected {
+                            FinishCommandResult::AuthenticationAccepted {
                                 handle,
-                                tag,
-                                mechanism,
-                                initial_response,
-                                authenticate_data,
-                            } => {
-                                break Some(ClientFlowEvent::AuthenticationRejected {
-                                    handle,
-                                    tag,
-                                    mechanism,
-                                    initial_response,
-                                    authenticate_data,
-                                    status,
-                                });
-                            }
+                                authenticate_command_data,
+                            } => ClientFlowEvent::AuthenticationAccepted {
+                                handle,
+                                authenticate_command_data,
+                                status,
+                            },
+                            FinishCommandResult::AuthenticationRejected {
+                                handle,
+                                authenticate_command_data,
+                            } => ClientFlowEvent::AuthenticationAccepted {
+                                handle,
+                                authenticate_command_data,
+                                status,
+                            },
                         }
                     } else {
-                        break Some(ClientFlowEvent::StatusReceived { status });
-                    }
+                        ClientFlowEvent::StatusReceived { status }
+                    };
+
+                    break Some(event);
                 }
                 Response::Data(data) => break Some(ClientFlowEvent::DataReceived { data }),
                 Response::CommandContinuationRequest(continuation) => {
-                    if self.send_command_state.continue_command() {
+                    if self.send_command_state.continue_literal() {
+                        // We received a continuation that was necessary for sending a command.
+                        // So we abort receiving responses for now and continue with sending commands.
                         break None;
-                    } else if let Some(handle) = self.send_command_state.continue_authenticate() {
+                    } else if let Some(&handle) = self.send_command_state.continue_authenticate() {
                         break Some(ClientFlowEvent::AuthenticationContinue {
                             handle,
                             continuation,
@@ -248,26 +236,71 @@ impl ClientFlow {
         Ok(event)
     }
 
-    fn maybe_abort_command(
-        &mut self,
-        status: &Status,
-    ) -> Option<(ClientFlowCommandHandle, Command<'static>)> {
-        let command = self.send_command_state.command_in_progress()?;
+    fn maybe_finish_command(&mut self, status: &Status) -> Option<FinishCommandResult> {
+        let command_kind = self.send_command_state.command_in_progress()?;
 
-        match status {
-            Status::Tagged(Tagged {
-                tag,
-                body: StatusBody { kind, .. },
-                ..
-            }) if *kind == StatusKind::Bad && tag == &command.tag => {
-                self.send_command_state.abort_command()
+        match command_kind {
+            SendCommandKind::Regular { command } => {
+                let removed_command = match status {
+                    Status::Tagged(Tagged {
+                        tag,
+                        body: StatusBody { kind, .. },
+                        ..
+                    }) if *kind == StatusKind::Bad && tag == &command.tag => {
+                        self.send_command_state.remove_command_in_progress()
+                    }
+                    _ => None,
+                };
+
+                if let Some((handle, SendCommandKind::Regular { command })) = removed_command {
+                    Some(FinishCommandResult::LiteralRejected { handle, command })
+                } else {
+                    None
+                }
             }
-            _ => None,
-        }
-    }
+            SendCommandKind::Authenticate {
+                authenticate_command_data,
+            } => {
+                let removed_command = match status {
+                    Status::Tagged(Tagged {
+                        tag,
+                        body: StatusBody { kind, .. },
+                        ..
+                    }) if tag == &authenticate_command_data.tag => {
+                        // TODO: Check kind here?
+                        self.send_command_state
+                            .remove_command_in_progress()
+                            .zip(Some(kind.clone()))
+                    }
+                    _ => None,
+                };
 
-    fn maybe_finish_authenticate(&mut self, status: &Status) -> Option<FinishAuthenticateResult> {
-        todo!()
+                if let Some((
+                    (
+                        handle,
+                        SendCommandKind::Authenticate {
+                            authenticate_command_data,
+                        },
+                    ),
+                    status_kind,
+                )) = removed_command
+                {
+                    if status_kind == StatusKind::Ok {
+                        Some(FinishCommandResult::AuthenticationAccepted {
+                            handle,
+                            authenticate_command_data,
+                        })
+                    } else {
+                        Some(FinishCommandResult::AuthenticationRejected {
+                            handle,
+                            authenticate_command_data,
+                        })
+                    }
+                } else {
+                    None
+                }
+            }
+        }
     }
 
     pub fn authenticate_continue(
@@ -276,24 +309,22 @@ impl ClientFlow {
     ) -> Result<ClientFlowCommandHandle, AuthenticateData> {
         self.send_command_state
             .continue_authenticate_with_data(authenticate_data)
+            .copied()
     }
 }
 
-enum FinishAuthenticateResult {
-    Accepted {
+enum FinishCommandResult {
+    LiteralRejected {
         handle: ClientFlowCommandHandle,
-        tag: Tag<'static>,
-        mechanism: AuthMechanism<'static>,
-        initial_response: Option<Secret<Cow<'static, [u8]>>>,
-        authenticate_data: Vec<AuthenticateData>,
+        command: Command<'static>,
     },
-    // TODO: handle, command, ...
-    Rejected {
+    AuthenticationAccepted {
         handle: ClientFlowCommandHandle,
-        tag: Tag<'static>,
-        mechanism: AuthMechanism<'static>,
-        initial_response: Option<Secret<Cow<'static, [u8]>>>,
-        authenticate_data: Vec<AuthenticateData>,
+        authenticate_command_data: AuthenticateCommandData,
+    },
+    AuthenticationRejected {
+        handle: ClientFlowCommandHandle,
+        authenticate_command_data: AuthenticateCommandData,
     },
 }
 
@@ -331,22 +362,14 @@ pub enum ClientFlowEvent {
         handle: ClientFlowCommandHandle,
         continuation: CommandContinuationRequest<'static>,
     },
-    // TODO: handle, command, ...
     AuthenticationAccepted {
         handle: ClientFlowCommandHandle,
-        tag: Tag<'static>,
-        mechanism: AuthMechanism<'static>,
-        initial_response: Option<Secret<Cow<'static, [u8]>>>,
-        authenticate_data: Vec<AuthenticateData>,
+        authenticate_command_data: AuthenticateCommandData,
         status: Status<'static>,
     },
-    // TODO: handle, command, ...
     AuthenticationRejected {
         handle: ClientFlowCommandHandle,
-        tag: Tag<'static>,
-        mechanism: AuthMechanism<'static>,
-        initial_response: Option<Secret<Cow<'static, [u8]>>>,
-        authenticate_data: Vec<AuthenticateData>,
+        authenticate_command_data: AuthenticateCommandData,
         status: Status<'static>,
     },
     /// Enqueued [`Command`] successfully sent.

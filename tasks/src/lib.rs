@@ -6,9 +6,10 @@ use std::{
 };
 
 use imap_codec::imap_types::{
+    auth::AuthenticateData,
     command::{Command, CommandBody},
     core::Tag,
-    response::{Bye, CommandContinuationRequest, Data, Response, Status, StatusBody, Tagged}, auth::AuthenticateData,
+    response::{Bye, CommandContinuationRequest, Data, Response, Status, StatusBody, Tagged},
 };
 use imap_flow::client::{ClientFlow, ClientFlowCommandHandle, ClientFlowError, ClientFlowEvent};
 use tag_generator::TagGenerator;
