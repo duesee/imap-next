@@ -5,6 +5,7 @@ use imap_codec::imap_types::{
 use imap_flow::{
     server::{ServerFlow, ServerFlowEvent, ServerFlowOptions},
     stream::AnyStream,
+    types::AuthenticateCommandData,
 };
 use tokio::net::TcpListener;
 
@@ -18,6 +19,7 @@ impl Sasl {
 }
 
 enum State {
+    #[allow(unused)]
     Incomplete,
     Finished,
 }
@@ -42,42 +44,72 @@ async fn main() {
 
     let mut dance = Sasl;
 
+    let mut tag = None;
+
     loop {
         match server.progress().await.unwrap() {
             ServerFlowEvent::AuthenticationStart {
-                tag,
-                mechanism,
-                initial_response,
+                authenticate_command_data:
+                    AuthenticateCommandData {
+                        tag: got_tag,
+                        mechanism,
+                        initial_response,
+                    },
             } => match mechanism {
                 AuthMechanism::Plain => {
                     if let Some(_initial_response) = initial_response {
-                        server.authenticate_finish(Status::ok(Some(tag), None, "...").unwrap());
+                        server
+                            .authenticate_finish(Status::ok(Some(got_tag), None, "...").unwrap())
+                            .unwrap();
                     } else {
-                        server.authenticate_continue(
-                            CommandContinuationRequest::basic(None, "...").unwrap(),
-                        );
+                        tag = Some(got_tag);
+                        server
+                            .authenticate_continue(
+                                CommandContinuationRequest::basic(None, "...").unwrap(),
+                            )
+                            .unwrap();
                     }
                 }
                 _ => {
-                    server.authenticate_reject(Status::no(Some(tag), None, "...").unwrap());
+                    server
+                        .authenticate_finish(Status::no(Some(got_tag), None, "...").unwrap())
+                        .unwrap();
                 }
             },
-            ServerFlowEvent::AuthenticationProgress { tag, authenticate_data: auth_data } => match auth_data {
-                AuthenticateData::Continue(..) => match dance.step(auth_data) {
-                    Ok(state) => match state {
-                        State::Incomplete => server.authenticate_continue(
-                            CommandContinuationRequest::basic(None, "...").unwrap(),
-                        ),
-                        State::Finished => {
-                            server.authenticate_finish(Status::ok(Some(tag), None, "...").unwrap())
+            ServerFlowEvent::AuthenticationProgress { authenticate_data } => match tag.clone() {
+                Some(tag) => match authenticate_data {
+                    AuthenticateData::Continue(..) => match dance.step(authenticate_data) {
+                        Ok(state) => match state {
+                            State::Incomplete => {
+                                server
+                                    .authenticate_continue(
+                                        CommandContinuationRequest::basic(None, "...").unwrap(),
+                                    )
+                                    .unwrap();
+                            }
+                            State::Finished => {
+                                server
+                                    .authenticate_finish(
+                                        Status::ok(Some(tag), None, "...").unwrap(),
+                                    )
+                                    .unwrap();
+                            }
+                        },
+                        Err(_) => {
+                            server
+                                .authenticate_finish(Status::no(Some(tag), None, "...").unwrap())
+                                .unwrap();
                         }
                     },
-                    Err(_) => {
-                        server.authenticate_reject(Status::no(Some(tag), None, "...").unwrap());
+                    AuthenticateData::Cancel => {
+                        server
+                            .authenticate_finish(Status::no(Some(tag), None, "...").unwrap())
+                            .unwrap();
                     }
                 },
-                AuthenticateData::Cancel => {
-                    server.authenticate_finish(Status::no(Some(tag), None, "...").unwrap())
+                None => {
+                    println!("Error");
+                    break;
                 }
             },
             event => {
