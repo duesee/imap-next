@@ -209,6 +209,9 @@ impl<K> SendCommandState<K> {
                 } => {
                     match data {
                         Some(data) => {
+                            // The data can only be set after receiving a continue from server
+                            assert!(received_continue);
+
                             // We received a `Continue` from the server and the auth data from the
                             // client-flow user. We can send the auth data now.
                             progress
@@ -216,9 +219,6 @@ impl<K> SendCommandState<K> {
                                 .extend(self.authenticate_data_codec.encode(&data))
                         }
                         None => {
-                            // The data can only be set after receiving a continue from server
-                            assert!(received_continue);
-
                             // Delay this because we still wait for the client flow user to call
                             // `authenticate_continue`.
                             progress.blocked_reason =

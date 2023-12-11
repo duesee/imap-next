@@ -5,7 +5,7 @@ use imap_codec::{
     decode::{GreetingDecodeError, ResponseDecodeError},
     imap_types::{
         auth::AuthenticateData,
-        command::{Command, CommandBody},
+        command::Command,
         response::{
             CommandContinuationRequest, Data, Greeting, Response, Status, StatusBody, StatusKind,
             Tagged,
@@ -108,12 +108,6 @@ impl ClientFlow {
     /// [`ClientFlow::progress`]. All [`Command`]s are sent in the same order they have been
     /// enqueued.
     pub fn enqueue_command(&mut self, command: Command<'static>) -> ClientFlowCommandHandle {
-        if let CommandBody::Authenticate { .. } = command.body {
-            // TODO: Remember that we send the AUTHENTICATE.
-            // The server will request additional data (if required).
-            todo!()
-        }
-
         let handle = self.handle_generator.generate();
         self.send_command_state.enqueue(handle, command);
         handle
@@ -207,7 +201,7 @@ impl ClientFlow {
                             FinishCommandResult::AuthenticationRejected {
                                 handle,
                                 authenticate_command_data,
-                            } => ClientFlowEvent::AuthenticationAccepted {
+                            } => ClientFlowEvent::AuthenticationRejected {
                                 handle,
                                 authenticate_command_data,
                                 status,
@@ -270,11 +264,10 @@ impl ClientFlow {
                         tag,
                         body: StatusBody { kind, .. },
                         ..
-                    }) if tag == &authenticate_command_data.tag => {
-                        self.send_command_state
-                            .remove_command_in_progress()
-                            .zip(Some(kind.clone()))
-                    }
+                    }) if tag == &authenticate_command_data.tag => self
+                        .send_command_state
+                        .remove_command_in_progress()
+                        .zip(Some(kind.clone())),
                     _ => None,
                 };
 
@@ -288,16 +281,17 @@ impl ClientFlow {
                     status_kind,
                 )) = removed_command
                 {
-                    if status_kind == StatusKind::Ok {
-                        Some(FinishCommandResult::AuthenticationAccepted {
+                    match status_kind {
+                        StatusKind::Ok => Some(FinishCommandResult::AuthenticationAccepted {
                             handle,
                             authenticate_command_data,
-                        })
-                    } else {
-                        Some(FinishCommandResult::AuthenticationRejected {
-                            handle,
-                            authenticate_command_data,
-                        })
+                        }),
+                        StatusKind::No | StatusKind::Bad => {
+                            Some(FinishCommandResult::AuthenticationRejected {
+                                handle,
+                                authenticate_command_data,
+                            })
+                        }
                     }
                 } else {
                     None
