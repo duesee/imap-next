@@ -11,7 +11,7 @@ use imap_codec::{
             Tagged,
         },
     },
-    CommandCodec, GreetingCodec, ResponseCodec,
+    AuthenticateDataCodec, CommandCodec, GreetingCodec, ResponseCodec,
 };
 use thiserror::Error;
 
@@ -79,7 +79,11 @@ impl ClientFlow {
         };
 
         // Create state to send commands ...
-        let send_command_state = SendCommandState::new(CommandCodec::default(), BytesMut::new());
+        let send_command_state = SendCommandState::new(
+            CommandCodec::default(),
+            AuthenticateDataCodec::default(),
+            BytesMut::new(),
+        );
 
         // ..., and state to receive responses.
         let receive_response_state = ReceiveState::new(
@@ -267,7 +271,6 @@ impl ClientFlow {
                         body: StatusBody { kind, .. },
                         ..
                     }) if tag == &authenticate_command_data.tag => {
-                        // TODO: Check kind here?
                         self.send_command_state
                             .remove_command_in_progress()
                             .zip(Some(kind.clone()))

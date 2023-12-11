@@ -17,7 +17,8 @@ use crate::{
 
 #[derive(Debug)]
 pub struct SendCommandState<K> {
-    codec: CommandCodec,
+    command_codec: CommandCodec,
+    authenticate_data_codec: AuthenticateDataCodec,
     // The commands that should be send.
     send_queue: VecDeque<SendCommandQueueEntry<K>>,
     // State of the command that is currently being sent.
@@ -28,9 +29,14 @@ pub struct SendCommandState<K> {
 }
 
 impl<K> SendCommandState<K> {
-    pub fn new(codec: CommandCodec, write_buffer: BytesMut) -> Self {
+    pub fn new(
+        command_codec: CommandCodec,
+        authenticate_data_codec: AuthenticateDataCodec,
+        write_buffer: BytesMut,
+    ) -> Self {
         Self {
-            codec,
+            command_codec,
+            authenticate_data_codec,
             send_queue: VecDeque::new(),
             send_progress: None,
             write_buffer,
@@ -38,7 +44,7 @@ impl<K> SendCommandState<K> {
     }
 
     pub fn enqueue(&mut self, key: K, command: Command<'static>) {
-        let fragments = self.codec.encode(&command).collect();
+        let fragments = self.command_codec.encode(&command).collect();
         let kind = match command.body {
             CommandBody::Authenticate {
                 mechanism,
@@ -80,10 +86,10 @@ impl<K> SendCommandState<K> {
         let Some(write_progress) = self.send_progress.as_mut() else {
             return false;
         };
-        let Some(literal_progress) = write_progress.suspended_reason.as_mut() else {
+        let Some(literal_progress) = write_progress.blocked_reason.as_mut() else {
             return false;
         };
-        let SendCommandSuspendedReason::WaitForLiteralAck {
+        let SendCommandBlockedReason::WaitForLiteralAck {
             received_continue, ..
         } = literal_progress
         else {
@@ -100,8 +106,8 @@ impl<K> SendCommandState<K> {
 
     pub fn continue_authenticate(&mut self) -> Option<&K> {
         let write_progress = self.send_progress.as_mut()?;
-        let literal_progress = write_progress.suspended_reason.as_mut()?;
-        let SendCommandSuspendedReason::WaitForAuthenticateData {
+        let literal_progress = write_progress.blocked_reason.as_mut()?;
+        let SendCommandBlockedReason::WaitForAuthenticateData {
             received_continue, ..
         } = literal_progress
         else {
@@ -123,10 +129,10 @@ impl<K> SendCommandState<K> {
         let Some(write_progress) = self.send_progress.as_mut() else {
             return Err(authenticate_data);
         };
-        let Some(literal_progress) = write_progress.suspended_reason.as_mut() else {
+        let Some(literal_progress) = write_progress.blocked_reason.as_mut() else {
             return Err(authenticate_data);
         };
-        let SendCommandSuspendedReason::WaitForAuthenticateData {
+        let SendCommandBlockedReason::WaitForAuthenticateData {
             received_continue,
             data,
         } = literal_progress
@@ -166,7 +172,7 @@ impl<K> SendCommandState<K> {
                 SendCommandProgress {
                     key: entry.key,
                     kind: entry.kind,
-                    suspended_reason: None,
+                    blocked_reason: None,
                     next_fragments: entry.fragments,
                 }
             }
@@ -174,9 +180,9 @@ impl<K> SendCommandState<K> {
         let progress = self.send_progress.insert(progress);
 
         // Handle the outstanding literal first if there is one
-        if let Some(suspended_reason) = progress.suspended_reason.take() {
+        if let Some(suspended_reason) = progress.blocked_reason.take() {
             match suspended_reason {
-                SendCommandSuspendedReason::WaitForLiteralAck {
+                SendCommandBlockedReason::WaitForLiteralAck {
                     data,
                     received_continue,
                 } => {
@@ -185,8 +191,8 @@ impl<K> SendCommandState<K> {
                         self.write_buffer.extend(data);
                     } else {
                         // Delay this literal because we still wait for the `Continue` from the server
-                        progress.suspended_reason =
-                            Some(SendCommandSuspendedReason::WaitForLiteralAck {
+                        progress.blocked_reason =
+                            Some(SendCommandBlockedReason::WaitForLiteralAck {
                                 data,
                                 received_continue,
                             });
@@ -197,17 +203,17 @@ impl<K> SendCommandState<K> {
                         return Ok(None);
                     }
                 }
-                SendCommandSuspendedReason::WaitForAuthenticateData {
+                SendCommandBlockedReason::WaitForAuthenticateData {
                     received_continue,
                     data,
                 } => {
                     match data {
                         Some(data) => {
-                            // We received a `Continue` from the server, we can send the literal now
-                            // TODO remove encode
-                            // TODO cancel?
-                            self.write_buffer
-                                .extend(AuthenticateDataCodec::new().encode(&data).dump());
+                            // We received a `Continue` from the server and the auth data from the
+                            // client-flow user. We can send the auth data now.
+                            progress
+                                .next_fragments
+                                .extend(self.authenticate_data_codec.encode(&data))
                         }
                         None => {
                             // The data can only be set after receiving a continue from server
@@ -215,8 +221,8 @@ impl<K> SendCommandState<K> {
 
                             // Delay this because we still wait for the client flow user to call
                             // `authenticate_continue`.
-                            progress.suspended_reason =
-                                Some(SendCommandSuspendedReason::WaitForAuthenticateData {
+                            progress.blocked_reason =
+                                Some(SendCommandBlockedReason::WaitForAuthenticateData {
                                     received_continue,
                                     data,
                                 });
@@ -239,15 +245,15 @@ impl<K> SendCommandState<K> {
                         // TODO: Handle `LITERAL{+,-}`.
                         // Delay this literal because we need to wait for a `Continue` from
                         // the server
-                        progress.suspended_reason =
-                            Some(SendCommandSuspendedReason::WaitForLiteralAck {
+                        progress.blocked_reason =
+                            Some(SendCommandBlockedReason::WaitForLiteralAck {
                                 data,
                                 received_continue: false,
                             });
                         break true;
                     }
-                    Fragment::AuthData { .. } => {
-                        unimplemented!()
+                    Fragment::AuthData { data } => {
+                        self.write_buffer.extend(data);
                     }
                 }
             } else {
@@ -274,12 +280,10 @@ impl<K> SendCommandState<K> {
                     // Authenticate is only treated as completed after receiving a "OK" from server
                     self.send_progress = Some(SendCommandProgress {
                         kind,
-                        suspended_reason: Some(
-                            SendCommandSuspendedReason::WaitForAuthenticateData {
-                                received_continue: false,
-                                data: None,
-                            },
-                        ),
+                        blocked_reason: Some(SendCommandBlockedReason::WaitForAuthenticateData {
+                            received_continue: false,
+                            data: None,
+                        }),
                         ..progress
                     });
                     Ok(None)
@@ -312,13 +316,13 @@ struct SendCommandProgress<K> {
     key: K,
     kind: SendCommandKind,
     // If defined we need to wait for something before we can send `next_fragments`.
-    suspended_reason: Option<SendCommandSuspendedReason>,
+    blocked_reason: Option<SendCommandBlockedReason>,
     // The fragments that need to be sent.
     next_fragments: VecDeque<Fragment>,
 }
 
 #[derive(Debug)]
-enum SendCommandSuspendedReason {
+enum SendCommandBlockedReason {
     WaitForLiteralAck {
         // The bytes of the literal.
         data: Vec<u8>,
