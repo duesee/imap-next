@@ -1,16 +1,15 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, mem};
 
 use bytes::BytesMut;
 use imap_codec::{
-    decode::CommandDecodeError,
+    decode::{AuthenticateDataDecodeError, CommandDecodeError},
     imap_types::{
-        auth::{AuthMechanism, AuthenticateData},
-        command::Command,
-        core::{Tag, Text},
+        auth::AuthenticateData,
+        command::{Command, CommandBody},
+        core::Text,
         response::{CommandContinuationRequest, Data, Greeting, Response, Status},
-        secret::Secret,
     },
-    CommandCodec, GreetingCodec, ResponseCodec,
+    AuthenticateDataCodec, CommandCodec, GreetingCodec, ResponseCodec,
 };
 use thiserror::Error;
 
@@ -19,6 +18,7 @@ use crate::{
     receive::{ReceiveEvent, ReceiveState},
     send::SendResponseState,
     stream::{AnyStream, StreamError},
+    types::AuthenticateCommandData,
 };
 
 static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ServerFlowResponseHandle> =
@@ -51,13 +51,38 @@ impl Default for ServerFlowOptions {
 pub struct ServerFlow {
     stream: AnyStream,
     max_literal_size: u32,
+    crlf_relaxed: bool,
 
     handle_generator: HandleGenerator<ServerFlowResponseHandle>,
     send_response_state: SendResponseState<ResponseCodec, Option<ServerFlowResponseHandle>>,
-    receive_command_state: ReceiveState<CommandCodec>,
+    receive_command_state: ServerReceiveState,
 
     literal_accept_text: Text<'static>,
     literal_reject_text: Text<'static>,
+}
+
+#[derive(Debug)]
+enum ServerReceiveState {
+    Command {
+        state: ReceiveState<CommandCodec>,
+    },
+    AuthenticateData {
+        state: ReceiveState<AuthenticateDataCodec>,
+        //command: AuthenticateCommandData,
+    },
+    Dummy,
+}
+
+impl From<ReceiveState<CommandCodec>> for ServerReceiveState {
+    fn from(state: ReceiveState<CommandCodec>) -> Self {
+        Self::Command { state }
+    }
+}
+
+impl From<ReceiveState<AuthenticateDataCodec>> for ServerReceiveState {
+    fn from(state: ReceiveState<AuthenticateDataCodec>) -> Self {
+        Self::AuthenticateData { state }
+    }
 }
 
 impl ServerFlow {
@@ -86,9 +111,10 @@ impl ServerFlow {
         let server_flow = Self {
             stream,
             max_literal_size: options.max_literal_size,
+            crlf_relaxed: options.crlf_relaxed,
             handle_generator: HANDLE_GENERATOR_GENERATOR.generate(),
             send_response_state,
-            receive_command_state,
+            receive_command_state: receive_command_state.into(),
             literal_accept_text: options.literal_accept_text,
             literal_reject_text: options.literal_reject_text,
         };
@@ -185,57 +211,140 @@ impl ServerFlow {
         }
     }
 
+    // TODO: Rename?
     async fn progress_command(&mut self) -> Result<Option<ServerFlowEvent>, ServerFlowError> {
-        match self
-            .receive_command_state
-            .progress(&mut self.stream)
-            .await?
-        {
-            ReceiveEvent::DecodingSuccess(command) => {
-                self.receive_command_state.finish_message();
-                Ok(Some(ServerFlowEvent::CommandReceived { command }))
-            }
-            ReceiveEvent::DecodingFailure(CommandDecodeError::LiteralFound {
-                tag,
-                length,
-                mode: _mode,
-            }) => {
-                if length > self.max_literal_size {
-                    let discarded_bytes = self.receive_command_state.discard_message();
+        let receive_command_state =
+            mem::replace(&mut self.receive_command_state, ServerReceiveState::Dummy);
 
-                    // Inform the client that the literal was rejected.
-                    // This should never fail because the text is not Base64.
-                    let status =
-                        Status::no(Some(tag), None, self.literal_reject_text.clone()).unwrap();
-                    self.send_response_state
-                        .enqueue(None, Response::Status(status));
+        let (next_receive_command_state, event) = match receive_command_state {
+            ServerReceiveState::Command { mut state } => {
+                match state.progress(&mut self.stream).await? {
+                    ReceiveEvent::DecodingSuccess(command) => {
+                        state.finish_message();
 
-                    Err(ServerFlowError::LiteralTooLong { discarded_bytes })
-                } else {
-                    self.receive_command_state.start_literal(length);
+                        match command.body {
+                            CommandBody::Authenticate {
+                                mechanism,
+                                initial_response,
+                            } => {
+                                let next_state = ReceiveState::new(
+                                    AuthenticateDataCodec::new(),
+                                    self.crlf_relaxed,
+                                    state.finish(),
+                                );
 
-                    // Inform the client that the literal was accepted.
-                    // This should never fail because the text is not Base64.
-                    let cont =
-                        CommandContinuationRequest::basic(None, self.literal_accept_text.clone())
+                                (
+                                    next_state.into(),
+                                    Ok(Some(ServerFlowEvent::AuthenticationStart {
+                                        authenticate_command_data: AuthenticateCommandData {
+                                            tag: command.tag,
+                                            mechanism,
+                                            initial_response,
+                                        },
+                                    })),
+                                )
+                            }
+                            body => (
+                                state.into(),
+                                Ok(Some(ServerFlowEvent::CommandReceived {
+                                    command: Command {
+                                        tag: command.tag,
+                                        body,
+                                    },
+                                })),
+                            ),
+                        }
+                    }
+                    ReceiveEvent::DecodingFailure(CommandDecodeError::LiteralFound {
+                        tag,
+                        length,
+                        mode: _mode,
+                    }) => {
+                        if length > self.max_literal_size {
+                            let discarded_bytes = state.discard_message();
+
+                            // Inform the client that the literal was rejected.
+                            // This should never fail because the text is not Base64.
+                            let status =
+                                Status::no(Some(tag), None, self.literal_reject_text.clone())
+                                    .unwrap();
+                            self.send_response_state
+                                .enqueue(None, Response::Status(status));
+
+                            (
+                                state.into(),
+                                Err(ServerFlowError::LiteralTooLong { discarded_bytes }),
+                            )
+                        } else {
+                            state.start_literal(length);
+
+                            // Inform the client that the literal was accepted.
+                            // This should never fail because the text is not Base64.
+                            let cont = CommandContinuationRequest::basic(
+                                None,
+                                self.literal_accept_text.clone(),
+                            )
                             .unwrap();
-                    self.send_response_state
-                        .enqueue(None, Response::CommandContinuationRequest(cont));
+                            self.send_response_state
+                                .enqueue(None, Response::CommandContinuationRequest(cont));
 
-                    Ok(None)
+                            (state.into(), Ok(None))
+                        }
+                    }
+                    ReceiveEvent::DecodingFailure(
+                        CommandDecodeError::Failed | CommandDecodeError::Incomplete,
+                    ) => {
+                        let discarded_bytes = state.discard_message();
+                        (
+                            state.into(),
+                            Err(ServerFlowError::MalformedMessage { discarded_bytes }),
+                        )
+                    }
+                    ReceiveEvent::ExpectedCrlfGotLf => {
+                        let discarded_bytes = state.discard_message();
+                        (
+                            state.into(),
+                            Err(ServerFlowError::ExpectedCrlfGotLf { discarded_bytes }),
+                        )
+                    }
                 }
             }
-            ReceiveEvent::DecodingFailure(
-                CommandDecodeError::Failed | CommandDecodeError::Incomplete,
-            ) => {
-                let discarded_bytes = self.receive_command_state.discard_message();
-                Err(ServerFlowError::MalformedMessage { discarded_bytes })
+            ServerReceiveState::AuthenticateData { mut state } => {
+                match state.progress(&mut self.stream).await? {
+                    ReceiveEvent::DecodingSuccess(authenticate_data) => {
+                        state.finish_message();
+                        (
+                            state.into(),
+                            Ok(Some(ServerFlowEvent::AuthenticationProgress {
+                                authenticate_data,
+                            })),
+                        )
+                    }
+                    ReceiveEvent::DecodingFailure(
+                        AuthenticateDataDecodeError::Failed
+                        | AuthenticateDataDecodeError::Incomplete,
+                    ) => {
+                        let discarded_bytes = state.discard_message();
+                        (
+                            state.into(),
+                            Err(ServerFlowError::MalformedMessage { discarded_bytes }),
+                        )
+                    }
+                    ReceiveEvent::ExpectedCrlfGotLf => {
+                        let discarded_bytes = state.discard_message();
+                        (
+                            state.into(),
+                            Err(ServerFlowError::ExpectedCrlfGotLf { discarded_bytes }),
+                        )
+                    }
+                }
             }
-            ReceiveEvent::ExpectedCrlfGotLf => {
-                let discarded_bytes = self.receive_command_state.discard_message();
-                Err(ServerFlowError::ExpectedCrlfGotLf { discarded_bytes })
-            }
-        }
+            ServerReceiveState::Dummy => unreachable!(),
+        };
+
+        self.receive_command_state = next_receive_command_state;
+
+        event
     }
 
     pub fn authenticate_reject(&mut self, _: Status<'static>) {
@@ -290,15 +399,12 @@ pub enum ServerFlowEvent {
     },
     // TODO: This was inlined from `Command` (tag) + `CommandBody::Authenticate` (mechanism + initial_response).
     AuthenticationStart {
-        tag: Tag<'static>,
-        mechanism: AuthMechanism<'static>,
-        initial_response: Option<Secret<Vec<u8>>>,
+        authenticate_command_data: AuthenticateCommandData,
     },
     // Note: This can either mean `Continue` or `Cancel` depending on `auth_data`.
     AuthenticationProgress {
         // Tag also required here ...
-        tag: Tag<'static>,
-        auth_data: AuthenticateData,
+        authenticate_data: AuthenticateData,
     },
 }
 

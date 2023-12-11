@@ -282,6 +282,7 @@ fn handle_client_event(
             let _handle = proxy_to_server.enqueue_command(command);
             // TODO: log handle
         }
+        _ => todo!(),
     }
 
     ControlFlow::Continue
@@ -360,6 +361,29 @@ fn handle_server_event(
             util::filter_capabilities_in_continuation(&mut continuation);
             let _handle = client_to_proxy.enqueue_continuation(continuation);
             // TODO: log handle
+        }
+        ClientFlowEvent::AuthenticationContinue {
+            handle,
+            continuation,
+        } => {
+            trace!(response=%format!("{:?}", continuation).blue(), role = "s2p", "<--| Received authentication continue");
+            client_to_proxy.enqueue_continuation(continuation);
+        }
+        ClientFlowEvent::AuthenticationAccepted {
+            handle,
+            authenticate_command_data,
+            status,
+        } => {
+            trace!(response=%format!("{:?}", status).blue(), role = "s2p", "<--| Received authentication accepted");
+            client_to_proxy.enqueue_status(status);
+        }
+        ClientFlowEvent::AuthenticationRejected {
+            handle,
+            authenticate_command_data,
+            status,
+        } => {
+            trace!(response=%format!("{:?}", status).blue(), role = "s2p", "<--| Received authentication rejected");
+            client_to_proxy.enqueue_status(status);
         }
     }
 

@@ -1,69 +1,3 @@
-//! AUTHENTICATE Example
-//!
-//! # OK (w/o initial data)
-//!
-//! ```imap
-//! C: A1 AUTHENTICATE PLAIN
-//! S: + ...                  // Server needs more data.
-//! C: sadjsalkdj==           // Client sends more data.
-//! S: A1 OK
-//! C: A2 NOOP
-//! ```
-//!
-//! ```imap
-//! C: A1 AUTHENTICATE LOGIN
-//! S: + ...                  // Server needs more data.
-//! C: sadjsalkdj==           // Client sends more data.
-//! S: + ...                  // Server needs more data (again).
-//! C: sadjsalkdj==           // Client sends more data (again).
-//! S: A1 OK
-//! C: A2 NOOP
-//! ```
-//!
-//! # OK (w/ initial data, i.e., "SASL-IR")
-//!
-//! ```imap
-//! C: A1 AUTHENTICATE PLAIN sadklsadj== // Client sends more data (in advance).
-//! S: A1 OK
-//! ```
-//!
-//! ```imap
-//! C: A1 AUTHENTICATE LOGIN sadklsadj== // Client sends more data (in advance).
-//! S: + ...                             // Server needs more data (again).
-//! C: sadjsalkdj==                      // Client sends more data (again).
-//! S: A1 OK
-//! ```
-//!
-//! # NO
-//!
-//! ```imap
-//! C: A1 AUTHENTICATE FOOOOOOO
-//! S: A1 NO
-//! ```
-//!
-//! ```imap
-//! C: A1 AUTHENTICATE FOOOOOOO
-//! S: + <some_insane_challenge>  
-//! C: *                          // Client aborts own AUTHENTICATE.
-//! ```
-//!
-//! # IDLE (OK)
-//!
-//! C: A1 IDLE
-//! S: + ...
-//! S: * 1 exists
-//! S: * 2 exists
-//! ...
-//! C: DONE
-//! S: A1 OK
-//! ```
-//! 
-//! # IDLE (NO)
-//!
-//! C: A1 IDLE
-//! S: A1 NO
-//! ```
-
 use imap_codec::imap_types::{
     auth::{AuthMechanism, AuthenticateData},
     response::{CommandContinuationRequest, Greeting, Status},
@@ -128,7 +62,7 @@ async fn main() {
                     server.authenticate_reject(Status::no(Some(tag), None, "...").unwrap());
                 }
             },
-            ServerFlowEvent::AuthenticationProgress { tag, auth_data } => match auth_data {
+            ServerFlowEvent::AuthenticationProgress { tag, authenticate_data: auth_data } => match auth_data {
                 AuthenticateData::Continue(..) => match dance.step(auth_data) {
                     Ok(state) => match state {
                         State::Incomplete => server.authenticate_continue(
