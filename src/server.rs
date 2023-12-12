@@ -18,7 +18,7 @@ use crate::{
     receive::{ReceiveEvent, ReceiveState},
     send::SendResponseState,
     stream::{AnyStream, StreamError},
-    types::AuthenticateCommandData,
+    types::CommandAuthenticate,
 };
 
 static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ServerFlowResponseHandle> =
@@ -257,8 +257,8 @@ impl ServerFlow {
 
                         (
                             next_state.into(),
-                            Ok(Some(ServerFlowEvent::AuthenticationStart {
-                                authenticate_command_data: AuthenticateCommandData {
+                            Ok(Some(ServerFlowEvent::CommandAuthenticateReceived {
+                                command_authenticate: CommandAuthenticate {
                                     tag: command.tag,
                                     mechanism,
                                     initial_response,
@@ -346,7 +346,7 @@ impl ServerFlow {
                 state.finish_message();
                 (
                     state.into(),
-                    Ok(Some(ServerFlowEvent::AuthenticationProgress {
+                    Ok(Some(ServerFlowEvent::AuthenticateDataReceived {
                         authenticate_data,
                     })),
                 )
@@ -433,24 +433,22 @@ impl Debug for ServerFlowResponseHandle {
 
 #[derive(Debug)]
 pub enum ServerFlowEvent {
-    CommandReceived {
-        command: Command<'static>,
+    /// Command received.
+    CommandReceived { command: Command<'static> },
+    /// Command AUTHENTICATE received.
+    CommandAuthenticateReceived {
+        command_authenticate: CommandAuthenticate,
     },
-    /// The enqueued [`Response`] was sent successfully.
+    /// Continuation to AUTHENTICATE received.
+    ///
+    /// Note: This can either mean `Continue` or `Cancel` depending on `authenticate_data`.
+    AuthenticateDataReceived { authenticate_data: AuthenticateData },
+    /// Enqueued [`Response`] was sent successfully.
     ResponseSent {
-        /// The handle of the enqueued [`Response`].
+        /// Handle of the formerly enqueued [`Response`].
         handle: ServerFlowResponseHandle,
         /// Formerly enqueued [`Response`] that was now sent.
         response: Response<'static>,
-    },
-    // TODO: This was inlined from `Command` (tag) + `CommandBody::Authenticate` (mechanism + initial_response).
-    AuthenticationStart {
-        authenticate_command_data: AuthenticateCommandData,
-    },
-    // Note: This can either mean `Continue` or `Cancel` depending on `auth_data`.
-    AuthenticationProgress {
-        // Tag also required here ...
-        authenticate_data: AuthenticateData,
     },
 }
 

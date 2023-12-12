@@ -20,7 +20,7 @@ use crate::{
     receive::{ReceiveEvent, ReceiveState},
     send::{SendCommandKind, SendCommandState},
     stream::{AnyStream, StreamError},
-    types::AuthenticateCommandData,
+    types::CommandAuthenticate,
 };
 
 static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ClientFlowCommandHandle> =
@@ -317,11 +317,11 @@ enum FinishCommandResult {
     },
     AuthenticationAccepted {
         handle: ClientFlowCommandHandle,
-        authenticate_command_data: AuthenticateCommandData,
+        authenticate_command_data: CommandAuthenticate,
     },
     AuthenticationRejected {
         handle: ClientFlowCommandHandle,
-        authenticate_command_data: AuthenticateCommandData,
+        authenticate_command_data: CommandAuthenticate,
     },
 }
 
@@ -361,12 +361,12 @@ pub enum ClientFlowEvent {
     },
     AuthenticationAccepted {
         handle: ClientFlowCommandHandle,
-        authenticate_command_data: AuthenticateCommandData,
+        authenticate_command_data: CommandAuthenticate,
         status: Status<'static>,
     },
     AuthenticationRejected {
         handle: ClientFlowCommandHandle,
-        authenticate_command_data: AuthenticateCommandData,
+        authenticate_command_data: CommandAuthenticate,
         status: Status<'static>,
     },
     /// Enqueued [`Command`] successfully sent.

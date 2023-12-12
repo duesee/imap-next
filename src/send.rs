@@ -12,7 +12,7 @@ use imap_codec::{
 
 use crate::{
     stream::{AnyStream, StreamError},
-    types::AuthenticateCommandData,
+    types::CommandAuthenticate,
 };
 
 #[derive(Debug)]
@@ -50,7 +50,7 @@ impl<K> SendCommandState<K> {
                 mechanism,
                 initial_response,
             } => SendCommandKind::Authenticate {
-                authenticate_command_data: AuthenticateCommandData {
+                authenticate_command_data: CommandAuthenticate {
                     tag: command.tag,
                     mechanism,
                     initial_response,
@@ -300,7 +300,7 @@ pub enum SendCommandKind {
         command: Command<'static>,
     },
     Authenticate {
-        authenticate_command_data: AuthenticateCommandData,
+        authenticate_command_data: CommandAuthenticate,
     },
 }
 

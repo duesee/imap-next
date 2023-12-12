@@ -5,7 +5,7 @@ use imap_codec::imap_types::{
 use imap_flow::{
     server::{ServerFlow, ServerFlowEvent, ServerFlowOptions},
     stream::AnyStream,
-    types::AuthenticateCommandData,
+    types::CommandAuthenticate,
 };
 use tokio::net::TcpListener;
 
@@ -48,9 +48,9 @@ async fn main() {
 
     loop {
         match server.progress().await.unwrap() {
-            ServerFlowEvent::AuthenticationStart {
-                authenticate_command_data:
-                    AuthenticateCommandData {
+            ServerFlowEvent::CommandAuthenticateReceived {
+                command_authenticate:
+                    CommandAuthenticate {
                         tag: got_tag,
                         mechanism,
                         initial_response,
@@ -76,7 +76,7 @@ async fn main() {
                         .unwrap();
                 }
             },
-            ServerFlowEvent::AuthenticationProgress { authenticate_data } => match tag.clone() {
+            ServerFlowEvent::AuthenticateDataReceived { authenticate_data } => match tag.clone() {
                 Some(tag) => match authenticate_data {
                     AuthenticateData::Continue(..) => match dance.step(authenticate_data) {
                         Ok(state) => match state {
