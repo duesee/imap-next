@@ -373,19 +373,19 @@ impl ServerFlow {
     pub fn authenticate_continue(
         &mut self,
         continuation: CommandContinuationRequest<'static>,
-    ) -> Result<ServerFlowResponseHandle, ()> {
+    ) -> Result<ServerFlowResponseHandle, ServerFlowError> {
         if let ServerReceiveState::AuthenticateData { .. } = self.receive_command_state {
             let handle = self.enqueue_continuation(continuation);
             Ok(handle)
         } else {
-            Err(())
+            Err(ServerFlowError::BadState)
         }
     }
 
     pub fn authenticate_finish(
         &mut self,
         status: Status<'static>,
-    ) -> Result<ServerFlowResponseHandle, ()> {
+    ) -> Result<ServerFlowResponseHandle, ServerFlowError> {
         let state = mem::replace(&mut self.receive_command_state, ServerReceiveState::Dummy);
 
         let (result, next_state) = if let ServerReceiveState::AuthenticateData { state } = state {
@@ -397,7 +397,7 @@ impl ServerFlow {
 
             (Ok(handle), state)
         } else {
-            (Err(()), state)
+            (Err(ServerFlowError::BadState), state)
         };
 
         self.receive_command_state = next_state;
@@ -462,4 +462,6 @@ pub enum ServerFlowError {
     MalformedMessage { discarded_bytes: Box<[u8]> },
     #[error("Literal was rejected because it was too long")]
     LiteralTooLong { discarded_bytes: Box<[u8]> },
+    #[error("bad state")]
+    BadState,
 }

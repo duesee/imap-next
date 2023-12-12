@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, error::Error};
 
 use imap_codec::imap_types::{
     auth::{AuthMechanism, AuthenticateData},
@@ -13,16 +13,15 @@ use tag_generator::TagGenerator;
 use tokio::net::TcpStream;
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() {
-    let mut tag_generator = TagGenerator::new();
+async fn main() -> Result<(), Box<dyn Error>> {
+    let stream = AnyStream::new(TcpStream::connect("127.0.0.1:12345").await?);
 
-    let stream = AnyStream::new(TcpStream::connect("127.0.0.1:12345").await.unwrap());
-
-    let (mut client, greeting) = ClientFlow::receive_greeting(stream, ClientFlowOptions::default())
-        .await
-        .unwrap();
+    let (mut client, greeting) =
+        ClientFlow::receive_greeting(stream, ClientFlowOptions::default()).await?;
 
     println!("{greeting:?}");
+
+    let mut tag_generator = TagGenerator::new();
 
     let tag = tag_generator.generate();
     client.enqueue_command(Command {
@@ -36,43 +35,26 @@ async fn main() {
     ]);
 
     loop {
-        match client.progress().await.unwrap() {
-            ClientFlowEvent::AuthenticationContinue {
-                handle,
-                continuation,
-            } => {
-                println!("AuthenticationContinue: {continuation:?}");
+        let event = client.progress().await?;
+        println!("{event:?}");
 
-                client.enqueue_command(Command {
-                    tag: tag_generator.generate(),
-                    body: CommandBody::Noop,
-                });
+        match event {
+            ClientFlowEvent::ContinuationAuthenticateReceived { .. } => {
                 if let Some(authenticate_data) = authenticate_data.pop_front() {
                     client.authenticate_continue(authenticate_data);
                 } else {
                     client.authenticate_continue(AuthenticateData::Cancel);
                 }
             }
-            ClientFlowEvent::AuthenticationAccepted { .. } => {
-                if authenticate_data.is_empty() {
-                    println!("Success");
-                    //break;
-                } else {
-                    println!("Unexpected success!!!!1^111");
-                    //break;
-                }
+            ClientFlowEvent::AuthenticateAccepted { .. } => {
+                break;
             }
-            ClientFlowEvent::AuthenticationRejected {
-                handle,
-                authenticate_command_data,
-                status,
-            } => {
-                println!("Failed {status:?}");
-                //break;
+            ClientFlowEvent::AuthenticateRejected { .. } => {
+                break;
             }
-            event => {
-                println!("unexpected event: {event:?}");
-            }
+            _ => {}
         }
     }
+
+    Ok(())
 }

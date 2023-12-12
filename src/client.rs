@@ -192,18 +192,18 @@ impl ClientFlow {
                             }
                             FinishCommandResult::AuthenticationAccepted {
                                 handle,
-                                authenticate_command_data,
-                            } => ClientFlowEvent::AuthenticationAccepted {
+                                command_authenticate,
+                            } => ClientFlowEvent::AuthenticateAccepted {
                                 handle,
-                                authenticate_command_data,
+                                command_authenticate,
                                 status,
                             },
                             FinishCommandResult::AuthenticationRejected {
                                 handle,
-                                authenticate_command_data,
-                            } => ClientFlowEvent::AuthenticationRejected {
+                                command_authenticate,
+                            } => ClientFlowEvent::AuthenticateRejected {
                                 handle,
-                                authenticate_command_data,
+                                command_authenticate,
                                 status,
                             },
                         }
@@ -220,7 +220,7 @@ impl ClientFlow {
                         // So we abort receiving responses for now and continue with sending commands.
                         break None;
                     } else if let Some(&handle) = self.send_command_state.continue_authenticate() {
-                        break Some(ClientFlowEvent::AuthenticationContinue {
+                        break Some(ClientFlowEvent::ContinuationAuthenticateReceived {
                             handle,
                             continuation,
                         });
@@ -284,12 +284,12 @@ impl ClientFlow {
                     match status_kind {
                         StatusKind::Ok => Some(FinishCommandResult::AuthenticationAccepted {
                             handle,
-                            authenticate_command_data,
+                            command_authenticate,
                         }),
                         StatusKind::No | StatusKind::Bad => {
                             Some(FinishCommandResult::AuthenticationRejected {
                                 handle,
-                                authenticate_command_data,
+                                command_authenticate,
                             })
                         }
                     }
@@ -317,11 +317,11 @@ enum FinishCommandResult {
     },
     AuthenticationAccepted {
         handle: ClientFlowCommandHandle,
-        authenticate_command_data: CommandAuthenticate,
+        command_authenticate: CommandAuthenticate,
     },
     AuthenticationRejected {
         handle: ClientFlowCommandHandle,
-        authenticate_command_data: CommandAuthenticate,
+        command_authenticate: CommandAuthenticate,
     },
 }
 
@@ -352,23 +352,6 @@ impl Debug for ClientFlowCommandHandle {
 
 #[derive(Debug)]
 pub enum ClientFlowEvent {
-    /// Server is requesting (more) authentication data.
-    /// TODO: This could also be encoded in ContinuationReceived (see below).
-    AuthenticationContinue {
-        /// Handle to the enqueued [`Command`].
-        handle: ClientFlowCommandHandle,
-        continuation: CommandContinuationRequest<'static>,
-    },
-    AuthenticationAccepted {
-        handle: ClientFlowCommandHandle,
-        authenticate_command_data: CommandAuthenticate,
-        status: Status<'static>,
-    },
-    AuthenticationRejected {
-        handle: ClientFlowCommandHandle,
-        authenticate_command_data: CommandAuthenticate,
-        status: Status<'static>,
-    },
     /// Enqueued [`Command`] successfully sent.
     CommandSent {
         /// Handle to the enqueued [`Command`].
@@ -394,39 +377,33 @@ pub enum ClientFlowEvent {
         /// (e.g. [`Code::Alert`](imap_codec::imap_types::response::Code::Alert)).
         status: Status<'static>,
     },
+    AuthenticateAccepted {
+        handle: ClientFlowCommandHandle,
+        command_authenticate: CommandAuthenticate,
+        status: Status<'static>,
+    },
+    AuthenticateRejected {
+        handle: ClientFlowCommandHandle,
+        command_authenticate: CommandAuthenticate,
+        status: Status<'static>,
+    },
     /// Server [`Data`] received.
     DataReceived { data: Data<'static> },
     /// Server [`Status`] received.
     StatusReceived { status: Status<'static> },
     /// Server [`CommandContinuationRequest`] response received.
     ///
-    /// Note: The received continuation was not part of [`ClientFlow`] literal handling.
-    /// It is either ...
-    /// * an acknowledgement to send authentication data,
-    /// * an acknowledgement to proceed with IDLE,
-    /// * or an unsolicited continuation (in which case processing is deferred to the user).
-    // TODO remove?
+    /// Note: The received continuation was not part of [`ClientFlow`] handling.
     ContinuationReceived {
-        // TODO: Add a context instead?
-        // context: ContinuationContext,
+        continuation: CommandContinuationRequest<'static>,
+    },
+    /// Server is requesting (more) authentication data.
+    ContinuationAuthenticateReceived {
+        /// Handle to the enqueued [`Command`].
+        handle: ClientFlowCommandHandle,
         continuation: CommandContinuationRequest<'static>,
     },
 }
-
-// TODO
-/*
-pub enum ContinuationContext {
-    Unknown,
-    Authenticate {
-        handle: ClientFlowCommandHandle,
-        tag: Tag<'static>,
-    },
-    Idle {
-        handle: ClientFlowCommandHandle,
-        tag: Tag<'static>,
-    },
-}
-*/
 
 #[derive(Debug, Error)]
 pub enum ClientFlowError {
