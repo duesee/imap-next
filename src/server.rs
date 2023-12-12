@@ -50,38 +50,29 @@ impl Default for ServerFlowOptions {
 #[derive(Debug)]
 pub struct ServerFlow {
     stream: AnyStream,
-    max_literal_size: u32,
-    crlf_relaxed: bool,
+    options: ServerFlowOptions,
 
     handle_generator: HandleGenerator<ServerFlowResponseHandle>,
     send_response_state: SendResponseState<ResponseCodec, Option<ServerFlowResponseHandle>>,
     receive_command_state: ServerReceiveState,
-
-    literal_accept_text: Text<'static>,
-    literal_reject_text: Text<'static>,
 }
 
 #[derive(Debug)]
 enum ServerReceiveState {
-    Command {
-        state: ReceiveState<CommandCodec>,
-    },
-    AuthenticateData {
-        state: ReceiveState<AuthenticateDataCodec>,
-        //command: AuthenticateCommandData,
-    },
+    Command(ReceiveState<CommandCodec>),
+    AuthenticateData(ReceiveState<AuthenticateDataCodec>),
     Dummy,
 }
 
 impl From<ReceiveState<CommandCodec>> for ServerReceiveState {
     fn from(state: ReceiveState<CommandCodec>) -> Self {
-        Self::Command { state }
+        Self::Command(state)
     }
 }
 
 impl From<ReceiveState<AuthenticateDataCodec>> for ServerReceiveState {
     fn from(state: ReceiveState<AuthenticateDataCodec>) -> Self {
-        Self::AuthenticateData { state }
+        Self::AuthenticateData(state)
     }
 }
 
@@ -110,13 +101,10 @@ impl ServerFlow {
             ReceiveState::new(CommandCodec::default(), options.crlf_relaxed, read_buffer);
         let server_flow = Self {
             stream,
-            max_literal_size: options.max_literal_size,
-            crlf_relaxed: options.crlf_relaxed,
+            options,
             handle_generator: HANDLE_GENERATOR_GENERATOR.generate(),
             send_response_state,
             receive_command_state: receive_command_state.into(),
-            literal_accept_text: options.literal_accept_text,
-            literal_reject_text: options.literal_reject_text,
         };
 
         Ok((server_flow, greeting))
@@ -184,17 +172,17 @@ impl ServerFlow {
         //
         // Therefore we prefer the second approach and begin with sending the responses.
         loop {
-            if let Some(event) = self.progress_response().await? {
+            if let Some(event) = self.progress_send().await? {
                 return Ok(event);
             }
 
-            if let Some(event) = self.progress_command().await? {
+            if let Some(event) = self.progress_receive().await? {
                 return Ok(event);
             }
         }
     }
 
-    async fn progress_response(&mut self) -> Result<Option<ServerFlowEvent>, ServerFlowError> {
+    async fn progress_send(&mut self) -> Result<Option<ServerFlowEvent>, ServerFlowError> {
         match self.send_response_state.progress(&mut self.stream).await? {
             Some((Some(handle), response)) => {
                 // A response was sucessfully sent, inform the caller
@@ -211,14 +199,14 @@ impl ServerFlow {
         }
     }
 
-    async fn progress_command(&mut self) -> Result<Option<ServerFlowEvent>, ServerFlowError> {
+    async fn progress_receive(&mut self) -> Result<Option<ServerFlowEvent>, ServerFlowError> {
         let receive_command_state =
             mem::replace(&mut self.receive_command_state, ServerReceiveState::Dummy);
 
         let (next_receive_command_state, result) = match receive_command_state {
-            ServerReceiveState::Command { state } => self.progress_command_really(state).await,
-            ServerReceiveState::AuthenticateData { state } => {
-                self.progress_authenticate_data_really(state).await
+            ServerReceiveState::Command(state) => self.progress_receive_command(state).await,
+            ServerReceiveState::AuthenticateData(state) => {
+                self.progress_receive_authenticate_data(state).await
             }
             ServerReceiveState::Dummy => unreachable!(),
         };
@@ -228,7 +216,7 @@ impl ServerFlow {
         result
     }
 
-    async fn progress_command_really(
+    async fn progress_receive_command(
         &mut self,
         mut state: ReceiveState<CommandCodec>,
     ) -> (
@@ -251,7 +239,7 @@ impl ServerFlow {
                     } => {
                         let next_state = ReceiveState::new(
                             AuthenticateDataCodec::new(),
-                            self.crlf_relaxed,
+                            self.options.crlf_relaxed,
                             state.finish(),
                         );
 
@@ -282,13 +270,14 @@ impl ServerFlow {
                 length,
                 mode: _mode,
             }) => {
-                if length > self.max_literal_size {
+                if length > self.options.max_literal_size {
                     let discarded_bytes = state.discard_message();
 
                     // Inform the client that the literal was rejected.
                     // This should never fail because the text is not Base64.
                     let status =
-                        Status::no(Some(tag), None, self.literal_reject_text.clone()).unwrap();
+                        Status::no(Some(tag), None, self.options.literal_reject_text.clone())
+                            .unwrap();
                     self.send_response_state
                         .enqueue(None, Response::Status(status));
 
@@ -301,9 +290,11 @@ impl ServerFlow {
 
                     // Inform the client that the literal was accepted.
                     // This should never fail because the text is not Base64.
-                    let cont =
-                        CommandContinuationRequest::basic(None, self.literal_accept_text.clone())
-                            .unwrap();
+                    let cont = CommandContinuationRequest::basic(
+                        None,
+                        self.options.literal_accept_text.clone(),
+                    )
+                    .unwrap();
                     self.send_response_state
                         .enqueue(None, Response::CommandContinuationRequest(cont));
 
@@ -329,7 +320,7 @@ impl ServerFlow {
         }
     }
 
-    async fn progress_authenticate_data_really(
+    async fn progress_receive_authenticate_data(
         &mut self,
         mut state: ReceiveState<AuthenticateDataCodec>,
     ) -> (
@@ -386,19 +377,23 @@ impl ServerFlow {
         &mut self,
         status: Status<'static>,
     ) -> Result<ServerFlowResponseHandle, ServerFlowError> {
-        let state = mem::replace(&mut self.receive_command_state, ServerReceiveState::Dummy);
+        let receive_command_state =
+            mem::replace(&mut self.receive_command_state, ServerReceiveState::Dummy);
 
-        let (result, next_state) = if let ServerReceiveState::AuthenticateData { state } = state {
-            let handle = self.enqueue_status(status);
+        let (result, next_state) =
+            if let ServerReceiveState::AuthenticateData(state) = receive_command_state {
+                let handle = self.enqueue_status(status);
 
-            let state = ServerReceiveState::Command {
-                state: ReceiveState::new(CommandCodec::new(), self.crlf_relaxed, state.finish()),
+                let state = ReceiveState::new(
+                    CommandCodec::new(),
+                    self.options.crlf_relaxed,
+                    state.finish(),
+                );
+
+                (Ok(handle), state.into())
+            } else {
+                (Err(ServerFlowError::BadState), receive_command_state)
             };
-
-            (Ok(handle), state)
-        } else {
-            (Err(ServerFlowError::BadState), state)
-        };
 
         self.receive_command_state = next_state;
 
@@ -463,5 +458,5 @@ pub enum ServerFlowError {
     #[error("Literal was rejected because it was too long")]
     LiteralTooLong { discarded_bytes: Box<[u8]> },
     #[error("bad state")]
-    BadState,
+    BadState, // TODO Damian: Hustenjakob doesn't like this
 }

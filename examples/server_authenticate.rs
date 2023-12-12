@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut dance = Sasl;
 
-    let mut tag = None;
+    let mut current_tag = None;
 
     loop {
         let event = server.progress().await?;
@@ -55,26 +55,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ServerFlowEvent::CommandAuthenticateReceived {
                 command_authenticate:
                     CommandAuthenticate {
-                        tag: got_tag,
+                        tag,
                         mechanism,
                         initial_response,
                     },
             } => match mechanism {
                 AuthMechanism::Plain => {
                     if let Some(_initial_response) = initial_response {
-                        server.authenticate_finish(Status::ok(Some(got_tag), None, "...")?)?;
+                        server.authenticate_finish(Status::ok(Some(tag), None, "...")?)?;
                     } else {
-                        tag = Some(got_tag);
+                        current_tag = Some(tag);
                         server.authenticate_continue(CommandContinuationRequest::basic(
                             None, "...",
                         )?)?;
                     }
                 }
                 _ => {
-                    server.authenticate_finish(Status::no(Some(got_tag), None, "...")?)?;
+                    server.authenticate_finish(Status::no(Some(tag), None, "...")?)?;
                 }
             },
-            ServerFlowEvent::AuthenticateDataReceived { authenticate_data } => match tag.clone() {
+            ServerFlowEvent::AuthenticateDataReceived { authenticate_data } => match current_tag
+                .clone()
+            {
                 Some(tag) => match authenticate_data {
                     AuthenticateData::Continue(..) => match dance.step(authenticate_data) {
                         Ok(state) => match state {

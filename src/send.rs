@@ -50,7 +50,7 @@ impl<K> SendCommandState<K> {
                 mechanism,
                 initial_response,
             } => SendCommandKind::Authenticate {
-                authenticate_command_data: CommandAuthenticate {
+                command_authenticate: CommandAuthenticate {
                     tag: command.tag,
                     mechanism,
                     initial_response,
@@ -300,7 +300,7 @@ pub enum SendCommandKind {
         command: Command<'static>,
     },
     Authenticate {
-        authenticate_command_data: CommandAuthenticate,
+        command_authenticate: CommandAuthenticate,
     },
 }
 

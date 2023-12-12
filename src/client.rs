@@ -134,24 +134,24 @@ impl ClientFlow {
         //
         // Therefore we prefer the second approach and begin with sending the commands.
         loop {
-            if let Some(event) = self.progress_command().await? {
+            if let Some(event) = self.progress_send().await? {
                 return Ok(event);
             }
 
-            if let Some(event) = self.progress_response().await? {
+            if let Some(event) = self.progress_receive().await? {
                 return Ok(event);
             }
         }
     }
 
-    async fn progress_command(&mut self) -> Result<Option<ClientFlowEvent>, ClientFlowError> {
+    async fn progress_send(&mut self) -> Result<Option<ClientFlowEvent>, ClientFlowError> {
         match self.send_command_state.progress(&mut self.stream).await? {
             Some((handle, command)) => Ok(Some(ClientFlowEvent::CommandSent { handle, command })),
             None => Ok(None),
         }
     }
 
-    async fn progress_response(&mut self) -> Result<Option<ClientFlowEvent>, ClientFlowError> {
+    async fn progress_receive(&mut self) -> Result<Option<ClientFlowEvent>, ClientFlowError> {
         let event = loop {
             let response = match self
                 .receive_response_state
@@ -257,14 +257,14 @@ impl ClientFlow {
                 }
             }
             SendCommandKind::Authenticate {
-                authenticate_command_data,
+                command_authenticate,
             } => {
                 let removed_command = match status {
                     Status::Tagged(Tagged {
                         tag,
                         body: StatusBody { kind, .. },
                         ..
-                    }) if tag == &authenticate_command_data.tag => self
+                    }) if tag == &command_authenticate.tag => self
                         .send_command_state
                         .remove_command_in_progress()
                         .zip(Some(kind.clone())),
@@ -275,7 +275,7 @@ impl ClientFlow {
                     (
                         handle,
                         SendCommandKind::Authenticate {
-                            authenticate_command_data,
+                            command_authenticate,
                         },
                     ),
                     status_kind,
