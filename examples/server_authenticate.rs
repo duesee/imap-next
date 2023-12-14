@@ -62,46 +62,58 @@ async fn main() -> Result<(), Box<dyn Error>> {
             } => match mechanism {
                 AuthMechanism::Plain => {
                     if let Some(_initial_response) = initial_response {
-                        server.authenticate_finish(Status::ok(Some(tag), None, "...")?)?;
+                        server
+                            .authenticate_finish(Status::ok(Some(tag), None, "...")?)
+                            .map_err(|_| "bad state")?;
                     } else {
                         current_tag = Some(tag);
-                        server.authenticate_continue(CommandContinuationRequest::basic(
-                            None, "...",
-                        )?)?;
+                        server
+                            .authenticate_continue(CommandContinuationRequest::basic(None, "...")?)
+                            .map_err(|_| "bad state")?;
                     }
                 }
                 _ => {
-                    server.authenticate_finish(Status::no(Some(tag), None, "...")?)?;
+                    server
+                        .authenticate_finish(Status::no(Some(tag), None, "...")?)
+                        .map_err(|_| "bad state")?;
                 }
             },
-            ServerFlowEvent::AuthenticateDataReceived { authenticate_data } => match current_tag
-                .clone()
-            {
-                Some(tag) => match authenticate_data {
-                    AuthenticateData::Continue(..) => match dance.step(authenticate_data) {
-                        Ok(state) => match state {
-                            State::Incomplete => {
-                                server.authenticate_continue(CommandContinuationRequest::basic(
-                                    None, "...",
-                                )?)?;
-                            }
-                            State::Finished => {
-                                server.authenticate_finish(Status::ok(Some(tag), None, "...")?)?;
+            ServerFlowEvent::AuthenticateDataReceived { authenticate_data } => {
+                match current_tag.clone() {
+                    Some(tag) => match authenticate_data {
+                        AuthenticateData::Continue(..) => match dance.step(authenticate_data) {
+                            Ok(state) => match state {
+                                State::Incomplete => {
+                                    server
+                                        .authenticate_continue(CommandContinuationRequest::basic(
+                                            None, "...",
+                                        )?)
+                                        .map_err(|_| "bad state")?;
+                                }
+                                State::Finished => {
+                                    server
+                                        .authenticate_finish(Status::ok(Some(tag), None, "...")?)
+                                        .map_err(|_| "bad state")?;
+                                }
+                            },
+                            Err(_) => {
+                                server
+                                    .authenticate_finish(Status::no(Some(tag), None, "...")?)
+                                    .map_err(|_| "bad state")?;
                             }
                         },
-                        Err(_) => {
-                            server.authenticate_finish(Status::no(Some(tag), None, "...")?)?;
+                        AuthenticateData::Cancel => {
+                            server
+                                .authenticate_finish(Status::no(Some(tag), None, "...")?)
+                                .map_err(|_| "bad state")?;
                         }
                     },
-                    AuthenticateData::Cancel => {
-                        server.authenticate_finish(Status::no(Some(tag), None, "...")?)?;
+                    None => {
+                        println!("Error");
+                        break;
                     }
-                },
-                None => {
-                    println!("Error");
-                    break;
                 }
-            },
+            }
             _ => {}
         }
     }
