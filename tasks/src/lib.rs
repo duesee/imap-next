@@ -6,7 +6,6 @@ use std::{
 };
 
 use imap_codec::imap_types::{
-    auth::AuthenticateData,
     command::{Command, CommandBody},
     core::Tag,
     response::{Bye, CommandContinuationRequest, Data, Response, Status, StatusBody, Tagged},
@@ -50,12 +49,12 @@ pub trait Task: 'static {
     }
 
     /// Process an command continuation request response.
-    fn process_authentication_continuation(
+    fn process_continuation(
         &mut self,
         continuation: CommandContinuationRequest<'static>,
-    ) -> Result<AuthenticateData, CommandContinuationRequest<'static>> {
+    ) -> Option<CommandContinuationRequest<'static>> {
         // Default: Don't process command continuation request response
-        Err(continuation)
+        Some(continuation)
     }
 
     /// Process bye response.
@@ -115,33 +114,6 @@ impl Scheduler {
             let event = self.flow.progress().await?;
 
             match event {
-                AuthenticationContinue {
-                    handle,
-                    continuation,
-                } => {
-                    let authenticate_data = task.process(continuation);
-                    self.flow.authenticate_continue(authenticate_data)
-                }
-                AuthenticationAccepted {
-                    handle,
-                    tag,
-                    mechanism,
-                    initial_response,
-                    authenticate_data,
-                    status,
-                } => {
-                    todo!()
-                }
-                AuthenticationRejected {
-                    handle,
-                    tag,
-                    mechanism,
-                    initial_response,
-                    authenticate_data,
-                    status,
-                } => {
-                    todo!()
-                }
                 ClientFlowEvent::CommandSent { handle, command } => {
                     // This `unwrap` can't fail because `waiting_tasks` contains all unsent `Commands`.
                     let entry = self.waiting_tasks.remove(&handle).unwrap();
@@ -160,6 +132,12 @@ impl Scheduler {
 
                     return Ok(SchedulerEvent::TaskFinished(TaskToken { handle, output }));
                 }
+                ClientFlowEvent::AuthenticateAccepted { .. } => {
+                    todo!()
+                }
+                ClientFlowEvent::AuthenticateRejected { .. } => {
+                    todo!()
+                }
                 ClientFlowEvent::DataReceived { data } => {
                     if let Some(data) = trickle_down(data, self.active_tasks_mut(), |task, data| {
                         task.process_data(data)
@@ -177,6 +155,9 @@ impl Scheduler {
                             Response::CommandContinuationRequest(continuation),
                         ));
                     }
+                }
+                ClientFlowEvent::ContinuationAuthenticateReceived { .. } => {
+                    todo!()
                 }
                 ClientFlowEvent::StatusReceived { status } => match status {
                     Status::Untagged(body) => {
@@ -378,7 +359,7 @@ where
         &mut self,
         continuation: CommandContinuationRequest<'static>,
     ) -> Option<CommandContinuationRequest<'static>> {
-        T::process_authentication_continuation(self, continuation)
+        T::process_continuation(self, continuation)
     }
 
     fn process_bye(&mut self, bye: Bye<'static>) -> Option<Bye<'static>> {
