@@ -64,6 +64,25 @@ enum ServerReceiveState {
     Dummy,
 }
 
+// TODO: Yolo!
+enum Event {
+    Command(ReceiveEvent<CommandCodec>),
+    AuthenticateData(ReceiveEvent<AuthenticateDataCodec>),
+}
+
+// TODO: Yolo!
+impl ServerReceiveState {
+    async fn progress(&mut self, stream: &mut AnyStream) -> Result<Event, StreamError> {
+        match self {
+            Self::Command(state) => state.progress(stream).await.map(Event::Command),
+            Self::AuthenticateData(state) => {
+                state.progress(stream).await.map(Event::AuthenticateData)
+            }
+            Self::Dummy => unreachable!(),
+        }
+    }
+}
+
 impl From<ReceiveState<CommandCodec>> for ServerReceiveState {
     fn from(state: ReceiveState<CommandCodec>) -> Self {
         Self::Command(state)
@@ -200,15 +219,28 @@ impl ServerFlow {
     }
 
     async fn progress_receive(&mut self) -> Result<Option<ServerFlowEvent>, ServerFlowError> {
-        let receive_command_state =
-            mem::replace(&mut self.receive_command_state, ServerReceiveState::Dummy);
+        let event = self
+            .receive_command_state
+            .progress(&mut self.stream)
+            .await?;
 
-        let (next_receive_command_state, result) = match receive_command_state {
-            ServerReceiveState::Command(state) => self.progress_receive_command(state).await,
-            ServerReceiveState::AuthenticateData(state) => {
-                self.progress_receive_authenticate_data(state).await
+        let state = mem::replace(&mut self.receive_command_state, ServerReceiveState::Dummy);
+
+        let (next_receive_command_state, result) = match event {
+            Event::Command(event) => {
+                let ServerReceiveState::Command(state) = state else {
+                    unreachable!()
+                };
+
+                self.progress_receive_command(state, event)
             }
-            ServerReceiveState::Dummy => unreachable!(),
+            Event::AuthenticateData(event) => {
+                let ServerReceiveState::AuthenticateData(state) = state else {
+                    unreachable!()
+                };
+
+                self.progress_receive_authenticate_data(state, event)
+            }
         };
 
         self.receive_command_state = next_receive_command_state;
@@ -216,18 +248,14 @@ impl ServerFlow {
         result
     }
 
-    async fn progress_receive_command(
+    fn progress_receive_command(
         &mut self,
         mut state: ReceiveState<CommandCodec>,
+        event: ReceiveEvent<CommandCodec>,
     ) -> (
         ServerReceiveState,
         Result<Option<ServerFlowEvent>, ServerFlowError>,
     ) {
-        let event = match state.progress(&mut self.stream).await {
-            Ok(event) => event,
-            Err(error) => return (state.into(), Err(error.into())),
-        };
-
         match event {
             ReceiveEvent::DecodingSuccess(command) => {
                 state.finish_message();
@@ -320,18 +348,14 @@ impl ServerFlow {
         }
     }
 
-    async fn progress_receive_authenticate_data(
+    fn progress_receive_authenticate_data(
         &mut self,
         mut state: ReceiveState<AuthenticateDataCodec>,
+        event: ReceiveEvent<AuthenticateDataCodec>,
     ) -> (
         ServerReceiveState,
         Result<Option<ServerFlowEvent>, ServerFlowError>,
     ) {
-        let event = match state.progress(&mut self.stream).await {
-            Ok(event) => event,
-            Err(error) => return (state.into(), Err(error.into())),
-        };
-
         match event {
             ReceiveEvent::DecodingSuccess(authenticate_data) => {
                 state.finish_message();
