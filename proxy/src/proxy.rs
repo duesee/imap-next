@@ -3,6 +3,7 @@ use std::{net::SocketAddr, sync::Arc};
 use colored::Colorize;
 use imap_codec::imap_types::{
     bounded_static::ToBoundedStatic,
+    command::{Command, CommandBody},
     core::Text,
     response::{Code, Status},
 };
@@ -270,6 +271,34 @@ fn handle_client_event(
     };
 
     match event {
+        ServerFlowEvent::CommandReceived { command } => {
+            trace!(command=%format!("{:?}", command).red(), role = "c2p", "|--> Received command");
+            let _handle = proxy_to_server.enqueue_command(command);
+            // TODO: log handle
+        }
+        ServerFlowEvent::CommandAuthenticateReceived {
+            command_authenticate,
+        } => {
+            let command = Command {
+                tag: command_authenticate.tag,
+                body: CommandBody::Authenticate {
+                    mechanism: command_authenticate.mechanism,
+                    initial_response: command_authenticate.initial_response,
+                },
+            };
+
+            trace!(command=%format!("{:?}", command).red(), role = "c2p", "|--> Received command (authenticate)");
+            let _handle = proxy_to_server.enqueue_command(command);
+            // TODO: log handle
+        }
+        ServerFlowEvent::AuthenticateDataReceived { authenticate_data } => {
+            trace!(authenticate_data=%format!("{:?}", authenticate_data).red(), role = "c2p", "|--> Received authenticate_data");
+            // TODO: unwrap
+            let _handle = proxy_to_server
+                .authenticate_continue(authenticate_data)
+                .unwrap();
+            // TODO: log handle
+        }
         ServerFlowEvent::ResponseSent {
             handle: _handle,
             response,
@@ -277,12 +306,6 @@ fn handle_client_event(
             // TODO: log handle
             trace!(role = "p2c", ?response, "<--- Forwarded response");
         }
-        ServerFlowEvent::CommandReceived { command } => {
-            trace!(command=%format!("{:?}", command).red(), role = "c2p", "|--> Received command");
-            let _handle = proxy_to_server.enqueue_command(command);
-            // TODO: log handle
-        }
-        _ => todo!(),
     }
 
     ControlFlow::Continue
@@ -344,6 +367,16 @@ fn handle_server_event(
             let _handle = client_to_proxy.enqueue_status(status);
             // TODO: log handle
         }
+        ClientFlowEvent::AuthenticateAccepted { status, .. } => {
+            trace!(response=%format!("{:?}", status).blue(), role = "s2p", "<--| Received authentication accepted");
+            // TODO
+            client_to_proxy.authenticate_finish(status).unwrap();
+        }
+        ClientFlowEvent::AuthenticateRejected { status, .. } => {
+            trace!(response=%format!("{:?}", status).blue(), role = "s2p", "<--| Received authentication rejected");
+            // TODO
+            client_to_proxy.authenticate_finish(status).unwrap();
+        }
         ClientFlowEvent::DataReceived { mut data } => {
             trace!(data=%format!("{:?}", data).blue(), role = "s2p", "<--| Received data");
             util::filter_capabilities_in_data(&mut data);
@@ -364,15 +397,7 @@ fn handle_server_event(
         }
         ClientFlowEvent::ContinuationAuthenticateReceived { continuation, .. } => {
             trace!(response=%format!("{:?}", continuation).blue(), role = "s2p", "<--| Received authentication continue");
-            client_to_proxy.enqueue_continuation(continuation);
-        }
-        ClientFlowEvent::AuthenticateAccepted { status, .. } => {
-            trace!(response=%format!("{:?}", status).blue(), role = "s2p", "<--| Received authentication accepted");
-            client_to_proxy.enqueue_status(status);
-        }
-        ClientFlowEvent::AuthenticateRejected { status, .. } => {
-            trace!(response=%format!("{:?}", status).blue(), role = "s2p", "<--| Received authentication rejected");
-            client_to_proxy.enqueue_status(status);
+            client_to_proxy.authenticate_continue(continuation).unwrap();
         }
     }
 
