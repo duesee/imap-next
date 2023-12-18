@@ -9,6 +9,16 @@ Still, ...
 > [!WARNING]
 > **Don't use in production (yet)!**
 
+## Features
+
+Thanks to `imap-flow`, the proxy ...
+
+* takes advantage of asynchronous I/O,
+* abstracts away literal handling, and
+* fully supports unsolicited responses,
+
+... making it easy to modify.
+
 ## Overview
 
 ```mermaid  
@@ -23,7 +33,7 @@ graph LR;
 
 > [!NOTE]
 > A few semantic changes are required to make the proxy more useful.
-> These changes are communicated by the proxy, e.g., by emitting a warning or prefixing a `text`.
+> These changes are communicated by the proxy, e.g., by emitting a warning or prefixing a `text` field.
 >
 > **Literal handling** IMAP allows sending commands "piece-by-piece" using literals.
 > However, forwarding single pieces rules out modifications that change the size of a literal.
