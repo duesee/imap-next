@@ -75,15 +75,42 @@ Note that you can start multiple services using TOML's [array of tables](https:/
 The `encryption` field configures transport encryption, i.e., `Insecure` or `Tls`.
 `Insecure` disables TLS encryption and SHOULD NOT be used when proxying to a remote server.
 
-## Features
+# Creation of local TLS certificates
 
-Thanks to `imap-flow`, the proxy ...
+Please install (and use) [`mkcert`](https://github.com/FiloSottile/mkcert) to create a local certificate authority (CA).
+The tool takes care to "register" the local CA with [typical trust stores](https://github.com/FiloSottile/mkcert#supported-root-stores) on your system.
 
-* takes advantage of asynchronous I/O,
-* abstracts away literal handling, and
-* fully supports unsolicited responses,
+We recommend creating a `private` folder in the `proxy` directory before creating certificates and keys.
+The `private` folder is `.gitignore'd, so you can't accidentally push your keys.
 
-... making it easy to modify.
+```shell
+mkdir private
+cd private
+```
+
+With `mkcert`, you should now be able to create a certificate (+ key), e.g., ...
+
+```shell
+mkcert localhost
+```
+
+The command creates two files, `localhost.pem` (certificate) and `localhost-key.pem` (key). Now, edit your `config.toml` ...
+
+```toml
+[services.bind.identity]
+type = "CertificateChainAndLeafKey"
+certificate_chain_path = "private/localhost.pem"
+leaf_key_path = "private/localhost-key.pem"
+```
+
+... accordingly, start the proxy, and test your connection with OpenSSL, e.g., ...
+
+```shell
+openssl s_client -verify_return_error -crlf -connect <host>:<port>
+```
+
+Note: `openssl s_client` should only really be used for testing.
+
 
 # Current purpose
 
