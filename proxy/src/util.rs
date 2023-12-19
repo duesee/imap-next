@@ -104,6 +104,9 @@ fn filter_capabilities(capabilities: NonEmptyVec<Capability>) -> NonEmptyVec<Cap
             Capability::Imap4Rev1 => true,
             Capability::Auth(auth_mechanism) if is_auth_mechanism_proxyable(auth_mechanism) => true,
             Capability::SaslIr => true,
+            Capability::Enable => true,
+            Capability::Quota | Capability::QuotaRes(_) | Capability::QuotaSet => true,
+            Capability::Move => true,
             _ => false,
         })
         .collect();
