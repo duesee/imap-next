@@ -91,7 +91,7 @@ Please install (and use) [`mkcert`](https://github.com/FiloSottile/mkcert) to cr
 The tool takes care to "register" the local CA with [typical trust stores](https://github.com/FiloSottile/mkcert#supported-root-stores) on your system.
 
 We recommend creating a `private` folder in the `proxy` directory before creating certificates and keys.
-The `private` folder is `.gitignore'd, so you can't accidentally push your keys.
+The `private` folder is `.gitignore`d, so you can't accidentally push your keys.
 
 ```shell
 mkdir private
