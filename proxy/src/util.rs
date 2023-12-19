@@ -103,6 +103,7 @@ fn filter_capabilities(capabilities: NonEmptyVec<Capability>) -> NonEmptyVec<Cap
         .filter(|capability| match capability {
             Capability::Imap4Rev1 => true,
             Capability::Auth(auth_mechanism) if is_auth_mechanism_proxyable(auth_mechanism) => true,
+            Capability::SaslIr => true,
             _ => false,
         })
         .collect();
