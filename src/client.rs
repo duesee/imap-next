@@ -86,11 +86,7 @@ impl ClientFlow {
         );
 
         // ..., and state to receive responses.
-        let receive_response_state = ReceiveState::new(
-            ResponseCodec::new(),
-            options.crlf_relaxed,
-            receive_greeting_state.finish(),
-        );
+        let receive_response_state = receive_greeting_state.change_codec(ResponseCodec::new());
 
         let client_flow = Self {
             stream,
