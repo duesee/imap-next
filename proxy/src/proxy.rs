@@ -367,14 +367,22 @@ fn handle_server_event(
             let _handle = client_to_proxy.enqueue_status(status);
             // TODO: log handle
         }
+        ClientFlowEvent::AuthenticateStarted { handle: _handle } => {
+            // TODO: log handle
+            trace!(role = "p2s", "---> Authentication started");
+        }
+        ClientFlowEvent::ContinuationAuthenticateReceived { continuation, .. } => {
+            trace!(response=%format!("{:?}", continuation).blue(), role = "s2p", "<--| Received authentication continue");
+            client_to_proxy.authenticate_continue(continuation).unwrap();
+        }
         ClientFlowEvent::AuthenticateAccepted { status, .. } => {
             trace!(response=%format!("{:?}", status).blue(), role = "s2p", "<--| Received authentication accepted");
-            // TODO
+            // TODO: Fix unwrap
             client_to_proxy.authenticate_finish(status).unwrap();
         }
         ClientFlowEvent::AuthenticateRejected { status, .. } => {
             trace!(response=%format!("{:?}", status).blue(), role = "s2p", "<--| Received authentication rejected");
-            // TODO
+            // TODO: Fix unwrap
             client_to_proxy.authenticate_finish(status).unwrap();
         }
         ClientFlowEvent::DataReceived { mut data } => {
@@ -394,10 +402,6 @@ fn handle_server_event(
             util::filter_capabilities_in_continuation(&mut continuation);
             let _handle = client_to_proxy.enqueue_continuation(continuation);
             // TODO: log handle
-        }
-        ClientFlowEvent::ContinuationAuthenticateReceived { continuation, .. } => {
-            trace!(response=%format!("{:?}", continuation).blue(), role = "s2p", "<--| Received authentication continue");
-            client_to_proxy.authenticate_continue(continuation).unwrap();
         }
     }
 

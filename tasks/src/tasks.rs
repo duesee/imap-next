@@ -113,12 +113,10 @@ impl Task for AuthenticatePlainTask {
     ) -> Result<AuthenticateData, CommandContinuationRequest<'static>> {
         if self.ir {
             Ok(AuthenticateData::Cancel)
+        } else if let Some(line) = self.line.take() {
+            Ok(AuthenticateData::Continue(Secret::new(line)))
         } else {
-            if let Some(line) = self.line.take() {
-                Ok(AuthenticateData::Continue(Secret::new(line)))
-            } else {
-                Ok(AuthenticateData::Cancel)
-            }
+            Ok(AuthenticateData::Cancel)
         }
     }
 

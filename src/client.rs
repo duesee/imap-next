@@ -18,7 +18,7 @@ use thiserror::Error;
 use crate::{
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveEvent, ReceiveState},
-    send::{SendCommandKind, SendCommandState},
+    send::{SendCommandEvent, SendCommandKind, SendCommandState},
     stream::{AnyStream, StreamError},
     types::CommandAuthenticate,
 };
@@ -146,7 +146,13 @@ impl ClientFlow {
 
     async fn progress_send(&mut self) -> Result<Option<ClientFlowEvent>, ClientFlowError> {
         match self.send_command_state.progress(&mut self.stream).await? {
-            Some((handle, command)) => Ok(Some(ClientFlowEvent::CommandSent { handle, command })),
+            Some(SendCommandEvent::CommandSent {
+                key: handle,
+                command,
+            }) => Ok(Some(ClientFlowEvent::CommandSent { handle, command })),
+            Some(SendCommandEvent::CommandAuthenticateStarted { key: handle }) => {
+                Ok(Some(ClientFlowEvent::AuthenticateStarted { handle }))
+            }
             None => Ok(None),
         }
     }
@@ -258,6 +264,7 @@ impl ClientFlow {
             }
             SendCommandKind::Authenticate {
                 command_authenticate,
+                ..
             } => {
                 let removed_command = match status {
                     Status::Tagged(Tagged {
@@ -276,6 +283,7 @@ impl ClientFlow {
                         handle,
                         SendCommandKind::Authenticate {
                             command_authenticate,
+                            ..
                         },
                     ),
                     status_kind,
@@ -377,6 +385,15 @@ pub enum ClientFlowEvent {
         /// (e.g. [`Code::Alert`](imap_codec::imap_types::response::Code::Alert)).
         status: Status<'static>,
     },
+    AuthenticateStarted {
+        handle: ClientFlowCommandHandle,
+    },
+    /// Server is requesting (more) authentication data.
+    ContinuationAuthenticateReceived {
+        /// Handle to the enqueued [`Command`].
+        handle: ClientFlowCommandHandle,
+        continuation: CommandContinuationRequest<'static>,
+    },
     AuthenticateAccepted {
         handle: ClientFlowCommandHandle,
         command_authenticate: CommandAuthenticate,
@@ -388,19 +405,17 @@ pub enum ClientFlowEvent {
         status: Status<'static>,
     },
     /// Server [`Data`] received.
-    DataReceived { data: Data<'static> },
+    DataReceived {
+        data: Data<'static>,
+    },
     /// Server [`Status`] received.
-    StatusReceived { status: Status<'static> },
+    StatusReceived {
+        status: Status<'static>,
+    },
     /// Server [`CommandContinuationRequest`] response received.
     ///
     /// Note: The received continuation was not part of [`ClientFlow`] handling.
     ContinuationReceived {
-        continuation: CommandContinuationRequest<'static>,
-    },
-    /// Server is requesting (more) authentication data.
-    ContinuationAuthenticateReceived {
-        /// Handle to the enqueued [`Command`].
-        handle: ClientFlowCommandHandle,
         continuation: CommandContinuationRequest<'static>,
     },
 }

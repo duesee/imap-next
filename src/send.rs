@@ -16,7 +16,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct SendCommandState<K> {
+pub struct SendCommandState<K: Copy> {
     command_codec: CommandCodec,
     authenticate_data_codec: AuthenticateDataCodec,
     // The commands that should be send.
@@ -28,7 +28,7 @@ pub struct SendCommandState<K> {
     write_buffer: BytesMut,
 }
 
-impl<K> SendCommandState<K> {
+impl<K: Copy> SendCommandState<K> {
     pub fn new(
         command_codec: CommandCodec,
         authenticate_data_codec: AuthenticateDataCodec,
@@ -55,6 +55,7 @@ impl<K> SendCommandState<K> {
                     mechanism,
                     initial_response,
                 },
+                started: false,
             },
             body => SendCommandKind::Regular {
                 command: Command {
@@ -154,7 +155,7 @@ impl<K> SendCommandState<K> {
     pub async fn progress(
         &mut self,
         stream: &mut AnyStream,
-    ) -> Result<Option<(K, Command<'static>)>, StreamError> {
+    ) -> Result<Option<SendCommandEvent<K>>, StreamError> {
         let progress = match self.send_progress.take() {
             Some(progress) => {
                 // We are currently sending a command to the server. This sending process was
@@ -274,23 +275,44 @@ impl<K> SendCommandState<K> {
             match progress.kind {
                 SendCommandKind::Regular { command } => {
                     // Command was sent completely
-                    Ok(Some((progress.key, command)))
+                    Ok(Some(SendCommandEvent::CommandSent {
+                        key: progress.key,
+                        command,
+                    }))
                 }
-                kind @ SendCommandKind::Authenticate { .. } => {
+                SendCommandKind::Authenticate {
+                    command_authenticate,
+                    started,
+                } => {
                     // Authenticate is only treated as completed after receiving a "OK" from server
-                    self.send_progress = Some(SendCommandProgress {
-                        kind,
+                    let progress = self.send_progress.insert(SendCommandProgress {
+                        kind: SendCommandKind::Authenticate {
+                            command_authenticate,
+                            started: true, // asdfsdf
+                        },
                         blocked_reason: Some(SendCommandBlockedReason::WaitForAuthenticateData {
                             received_continue: false,
                             data: None,
                         }),
                         ..progress
                     });
-                    Ok(None)
+
+                    if started {
+                        Ok(None)
+                    } else {
+                        Ok(Some(SendCommandEvent::CommandAuthenticateStarted {
+                            key: progress.key,
+                        }))
+                    }
                 }
             }
         }
     }
+}
+
+pub enum SendCommandEvent<K> {
+    CommandSent { key: K, command: Command<'static> },
+    CommandAuthenticateStarted { key: K },
 }
 
 // TODO better name
@@ -301,6 +323,7 @@ pub enum SendCommandKind {
     },
     Authenticate {
         command_authenticate: CommandAuthenticate,
+        started: bool,
     },
 }
 

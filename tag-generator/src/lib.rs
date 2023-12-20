@@ -16,6 +16,7 @@ impl TagGenerator {
     /// Generate an instance of a `TagGenerator`
     ///
     /// Returns a `TagGenerator` generating tags with a unique prefix.
+    #[allow(clippy::new_without_default)]
     pub fn new() -> TagGenerator {
         // There is no synchronization required and we only care about each thread seeing a unique value.
         let global = GLOBAL_TAG_GENERATOR_COUNT.fetch_add(1, Ordering::Relaxed);
