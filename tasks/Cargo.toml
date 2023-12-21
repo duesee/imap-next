@@ -2,6 +2,7 @@
 name = "tasks"
 version = "0.1.0"
 edition = "2021"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 imap-codec = "1.0.0"
