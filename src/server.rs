@@ -125,12 +125,12 @@ impl ServerFlow {
     /// enqueued.
     pub fn enqueue_continuation(
         &mut self,
-        cotinuation: CommandContinuationRequest<'static>,
+        continuation: CommandContinuationRequest<'static>,
     ) -> ServerFlowResponseHandle {
         let handle = self.handle_generator.generate();
         self.send_response_state.enqueue(
             Some(handle),
-            Response::CommandContinuationRequest(cotinuation),
+            Response::CommandContinuationRequest(continuation),
         );
         handle
     }
