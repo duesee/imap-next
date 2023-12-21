@@ -39,7 +39,7 @@ pub trait Task: 'static {
         Some(data)
     }
 
-    /// Process an untagged response.
+    /// Process untagged response.
     fn process_untagged(
         &mut self,
         status_body: StatusBody<'static>,
@@ -48,7 +48,7 @@ pub trait Task: 'static {
         Some(status_body)
     }
 
-    /// Process an command continuation request response.
+    /// Process command continuation request response.
     fn process_continuation(
         &mut self,
         continuation: CommandContinuationRequest<'static>,

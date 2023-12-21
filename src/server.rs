@@ -264,9 +264,9 @@ impl Debug for ServerFlowResponseHandle {
 
 #[derive(Debug)]
 pub enum ServerFlowEvent {
-    /// The enqueued [`Response`] was sent successfully.
+    /// Enqueued [`Response`] was sent successfully.
     ResponseSent {
-        /// The handle of the enqueued [`Response`].
+        /// Handle of the formerly enqueued [`Response`].
         handle: ServerFlowResponseHandle,
         /// Formerly enqueued [`Response`] that was now sent.
         response: Response<'static>,
