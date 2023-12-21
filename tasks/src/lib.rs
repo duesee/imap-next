@@ -6,6 +6,7 @@ use std::{
 };
 
 use imap_codec::imap_types::{
+    auth::AuthenticateData,
     command::{Command, CommandBody},
     core::Tag,
     response::{Bye, CommandContinuationRequest, Data, Response, Status, StatusBody, Tagged},
@@ -55,6 +56,15 @@ pub trait Task: 'static {
     ) -> Option<CommandContinuationRequest<'static>> {
         // Default: Don't process command continuation request response
         Some(continuation)
+    }
+
+    /// Process command continuation request response (during authenticate).
+    fn process_continuation_authenticate(
+        &mut self,
+        continuation: CommandContinuationRequest<'static>,
+    ) -> Result<AuthenticateData, CommandContinuationRequest<'static>> {
+        // Default: Don't process command continuation request response (during authenticate)
+        Err(continuation)
     }
 
     /// Process bye response.
@@ -129,6 +139,48 @@ impl Scheduler {
 
                     // This `unwrap` can't fail because `active_tasks` contains all in-progress `Commands`.
                     let (_, _, task) = self.active_tasks.remove_by_handle(handle).unwrap();
+
+                    let output = Some(task.process_tagged(body));
+
+                    return Ok(SchedulerEvent::TaskFinished(TaskToken { handle, output }));
+                }
+                ClientFlowEvent::AuthenticateStarted { handle } => {
+                    let (handle, tag, task) = self.waiting_tasks.remove_by_handle(handle).unwrap();
+                    self.active_tasks.push_back(handle, tag, task);
+                }
+                ClientFlowEvent::ContinuationAuthenticateReceived {
+                    handle,
+                    continuation,
+                } => {
+                    let task = self.active_tasks.get_task_by_handle_mut(handle).unwrap();
+                    if let Err(continuation) = task.process_continuation_authenticate(continuation)
+                    {
+                        return Ok(SchedulerEvent::Unsolicited(
+                            Response::CommandContinuationRequest(continuation),
+                        ));
+                    }
+                }
+                ClientFlowEvent::AuthenticateAccepted { handle, status, .. } => {
+                    let (_, _, task) = self.active_tasks.remove_by_handle(handle).unwrap();
+
+                    let body = match status {
+                        Status::Untagged(_) => unreachable!(),
+                        Status::Tagged(tagged) => tagged.body,
+                        Status::Bye(_) => unreachable!(),
+                    };
+
+                    let output = Some(task.process_tagged(body));
+
+                    return Ok(SchedulerEvent::TaskFinished(TaskToken { handle, output }));
+                }
+                ClientFlowEvent::AuthenticateRejected { handle, status, .. } => {
+                    let (_, _, task) = self.active_tasks.remove_by_handle(handle).unwrap();
+
+                    let body = match status {
+                        Status::Untagged(_) => unreachable!(),
+                        Status::Tagged(tagged) => tagged.body,
+                        Status::Bye(_) => unreachable!(),
+                    };
 
                     let output = Some(task.process_tagged(body));
 
@@ -369,6 +421,11 @@ trait TaskAny {
         continuation: CommandContinuationRequest<'static>,
     ) -> Option<CommandContinuationRequest<'static>>;
 
+    fn process_continuation_authenticate(
+        &mut self,
+        continuation: CommandContinuationRequest<'static>,
+    ) -> Result<AuthenticateData, CommandContinuationRequest<'static>>;
+
     fn process_bye(&mut self, bye: Bye<'static>) -> Option<Bye<'static>>;
 
     fn process_tagged(self: Box<Self>, status_body: StatusBody<'static>) -> Box<dyn Any>;
@@ -394,6 +451,13 @@ where
         continuation: CommandContinuationRequest<'static>,
     ) -> Option<CommandContinuationRequest<'static>> {
         T::process_continuation(self, continuation)
+    }
+
+    fn process_continuation_authenticate(
+        &mut self,
+        continuation: CommandContinuationRequest<'static>,
+    ) -> Result<AuthenticateData, CommandContinuationRequest<'static>> {
+        T::process_continuation_authenticate(self, continuation)
     }
 
     fn process_bye(&mut self, bye: Bye<'static>) -> Option<Bye<'static>> {
