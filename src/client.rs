@@ -268,13 +268,9 @@ pub enum ClientFlowEvent {
         status: Status<'static>,
     },
     /// Server [`Data`] received.
-    DataReceived {
-        data: Data<'static>,
-    },
+    DataReceived { data: Data<'static> },
     /// Server [`Status`] received.
-    StatusReceived {
-        status: Status<'static>,
-    },
+    StatusReceived { status: Status<'static> },
     /// Server [`CommandContinuationRequest`] response received.
     ///
     /// Note: The received continuation was not part of [`ClientFlow`] literal handling.
