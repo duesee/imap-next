@@ -183,9 +183,6 @@ impl ServerFlow {
     }
 
     async fn progress_receive(&mut self) -> Result<Option<ServerFlowEvent>, ServerFlowError> {
-        self.receive_command_state
-            .change_state(self.next_expected_message);
-
         match &mut self.receive_command_state {
             ServerReceiveState::Command(state) => {
                 match state.progress(&mut self.stream).await? {
@@ -198,6 +195,9 @@ impl ServerFlow {
                                 initial_response,
                             } => {
                                 self.next_expected_message = NextExpectedMessage::AuthenticateData;
+
+                                self.receive_command_state
+                                    .change_state(self.next_expected_message);
 
                                 Ok(Some(ServerFlowEvent::CommandAuthenticateReceived {
                                     command_authenticate: CommandAuthenticate {
@@ -309,6 +309,9 @@ impl ServerFlow {
         if let ServerReceiveState::AuthenticateData(_) = &mut self.receive_command_state {
             let handle = self.enqueue_status(status);
             self.next_expected_message = NextExpectedMessage::Command;
+
+            self.receive_command_state
+                .change_state(self.next_expected_message);
 
             Ok(handle)
         } else {
