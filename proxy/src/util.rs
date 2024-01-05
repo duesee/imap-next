@@ -103,7 +103,12 @@ fn filter_capabilities(capabilities: NonEmptyVec<Capability>) -> NonEmptyVec<Cap
         //       However, for this to work, the proxy needs to learn how to handle
         //       IMAP authentication flows. This *should* be the last remaining
         //       difficulty we (probably) want to solve for basic IMAP interop.
-        .filter(|capability| matches!(capability, Capability::Imap4Rev1))
+        .filter(|capability| match capability {
+            Capability::Imap4Rev1 => true,
+            Capability::Quota | Capability::QuotaRes(_) | Capability::QuotaSet => true,
+            Capability::Move => true,
+            _ => false,
+        })
         .collect();
 
     NonEmptyVec::try_from(filtered).unwrap_or(NonEmptyVec::from(Capability::Imap4Rev1))
