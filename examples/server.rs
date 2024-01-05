@@ -7,21 +7,21 @@ use tokio::net::TcpListener;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let stream = {
-        let listener = TcpListener::bind("127.0.0.1:12345").await.unwrap();
+    let (mut server, _) = {
+        let stream = {
+            let listener = TcpListener::bind("127.0.0.1:12345").await.unwrap();
+            let (stream, _) = listener.accept().await.unwrap();
+            stream
+        };
 
-        let (stream, _) = listener.accept().await.unwrap();
-
-        stream
+        ServerFlow::send_greeting(
+            AnyStream::new(stream),
+            ServerFlowOptions::default(),
+            Greeting::ok(None, "server (example)").unwrap(),
+        )
+        .await
+        .unwrap()
     };
-
-    let (mut server, _) = ServerFlow::send_greeting(
-        AnyStream::new(stream),
-        ServerFlowOptions::default(),
-        Greeting::ok(None, "Hello, World!").unwrap(),
-    )
-    .await
-    .unwrap();
 
     let mut handle = None;
 
