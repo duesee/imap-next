@@ -3,7 +3,6 @@ use std::{net::SocketAddr, sync::Arc};
 use colored::Colorize;
 use imap_codec::imap_types::{
     bounded_static::ToBoundedStatic,
-    command::{Command, CommandBody},
     core::Text,
     response::{Code, Status},
 };
@@ -286,13 +285,7 @@ fn handle_client_event(
         ServerFlowEvent::CommandAuthenticateReceived {
             command_authenticate,
         } => {
-            let command = Command {
-                tag: command_authenticate.tag,
-                body: CommandBody::Authenticate {
-                    mechanism: command_authenticate.mechanism,
-                    initial_response: command_authenticate.initial_response,
-                },
-            };
+            let command = command_authenticate.into();
 
             trace!(command=%format!("{:?}", command).red(), role = "c2p", "|--> Received command (authenticate)");
             let _handle = proxy_to_server.enqueue_command(command);
