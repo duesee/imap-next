@@ -397,12 +397,24 @@ pub enum ServerFlowEvent {
     /// Command received.
     CommandReceived { command: Command<'static> },
     /// Command AUTHENTICATE received.
+    ///
+    /// Note: The server MUST call [`ServerFlow::authenticate_continue`] (if it needs more data for
+    /// authentication) or [`ServerFlow::authenticate_finish`] (if there already is enough data for
+    /// authentication) next. "Enough data" is determined by the used SASL mechanism, if there was
+    /// an initial response (SASL-IR), etc.
     CommandAuthenticateReceived {
         command_authenticate: CommandAuthenticate,
     },
     /// Continuation to AUTHENTICATE received.
     ///
-    /// Note: This can either mean `Continue` or `Cancel` depending on `authenticate_data`.
+    /// Note: The server MUST call [`ServerFlow::authenticate_continue`] (if it needs more data for
+    /// authentication) or [`ServerFlow::authenticate_finish`] (if there already is enough data for
+    /// authentication) next. "Enough data" is determined by the used SASL mechanism, if there was
+    /// an initial response (SASL-IR), etc.
+    ///
+    /// Note, too: The client may abort the authentication by using [`AuthenticateData::Cancel`].
+    /// Make sure to honor the client's request to not end up in an infinite loop. It's up to the
+    /// server to end the authentication flow.
     AuthenticateDataReceived { authenticate_data: AuthenticateData },
 }
 
