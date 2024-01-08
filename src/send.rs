@@ -82,7 +82,6 @@ impl<K: Copy> SendCommandState<K> {
             .map(|progress| (progress.key, progress.kind))
     }
 
-    // TODO: Rename?
     pub fn continue_literal(&mut self) -> bool {
         let Some(write_progress) = self.send_progress.as_mut() else {
             return false;
@@ -288,7 +287,7 @@ impl<K: Copy> SendCommandState<K> {
                     let progress = self.send_progress.insert(SendCommandProgress {
                         kind: SendCommandKind::Authenticate {
                             command_authenticate,
-                            started: true, // asdfsdf
+                            started: true,
                         },
                         blocked_reason: Some(SendCommandBlockedReason::WaitForAuthenticateData {
                             received_continue: false,
