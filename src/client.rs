@@ -382,6 +382,13 @@ pub enum ClientFlowEvent {
         handle: ClientFlowCommandHandle,
     },
     /// Server is requesting (more) authentication data.
+    ///
+    /// The client MUST call [`ClientFlow::authenticate_continue`] next.
+    ///
+    /// Note: The client can also progress the authentication by sending [`AuthenticateData::Cancel`].
+    /// However, it's up to the server to abort the authentication flow by sending a tagged status
+    /// response. In this case, the client will receive either a [`ClientFlowEvent::AuthenticateAccepted`]
+    /// or [`ClientFlowEvent::AuthenticateRejected`] event.
     ContinuationAuthenticateReceived {
         /// Handle to the enqueued [`Command`].
         handle: ClientFlowCommandHandle,
