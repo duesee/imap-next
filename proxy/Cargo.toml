@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 anyhow = "1.0.75"
 argh = "0.1.12"
 colored = "2.0.4"
-imap-codec = { version = "1.0.0", features = ["bounded-static", "quirk_crlf_relaxed"] }
+imap-codec = { version = "2.0.0", features = ["bounded-static", "quirk_crlf_relaxed"] }
 imap-flow = { path = ".." }
 rustls = "0.21.7"
 rustls-pemfile = "2.0.0-alpha.1"

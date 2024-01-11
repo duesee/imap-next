@@ -252,9 +252,6 @@ impl<K: Copy> SendCommandState<K> {
                             });
                         break true;
                     }
-                    Fragment::AuthData { data } => {
-                        self.write_buffer.extend(data);
-                    }
                 }
             } else {
                 break false;
@@ -425,7 +422,6 @@ where
                         Fragment::Line { data } => data,
                         // TODO: Handle `LITERAL{+,-}`.
                         Fragment::Literal { data, mode: _mode } => data,
-                        Fragment::AuthData { data } => data,
                     };
                     self.write_buffer.extend(data);
                 }
