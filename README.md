@@ -6,8 +6,12 @@
 
 # imap-flow
 
-The `imap-flow` repository provides a thin abstraction layer that handles IMAP client and server flows.
-One of the main features of `imap-flow` is that it abstracts away literal handling, making it easier to work with IMAP.
+`imap-flow` is a thin abstraction over IMAP's distinct "protocol flows".
+These are literal handling, AUTHENTICATE, and IDLE.
+
+The way these flows were defined in IMAP couples networking, parsing, and business logic.
+`imap-flow` untangles these flows, providing a minimal interface allowing sending and receiving coherent messages.
+It's a thin layer paving the ground for a correct client or server implementation.
 
 ## Playground
 
