@@ -6,6 +6,7 @@ use imap_codec::{
     imap_types::{
         auth::AuthenticateData,
         command::{Command, CommandBody},
+        core::LiteralMode,
     },
     AuthenticateDataCodec, CommandCodec,
 };
@@ -238,20 +239,19 @@ impl<K: Copy> SendCommandState<K> {
         let need_continue = loop {
             if let Some(fragment) = progress.next_fragments.pop_front() {
                 match fragment {
-                    Fragment::Line { data } => {
-                        self.write_buffer.extend(data);
-                    }
-                    Fragment::Literal { data, mode: _mode } => {
-                        // TODO: Handle `LITERAL{+,-}`.
-                        // Delay this literal because we need to wait for a `Continue` from
-                        // the server
-                        progress.blocked_reason =
-                            Some(SendCommandBlockedReason::WaitForLiteralAck {
-                                data,
-                                received_continue: false,
-                            });
-                        break true;
-                    }
+                    Fragment::Line { data } => self.write_buffer.extend(data),
+                    Fragment::Literal { data, mode } => match mode {
+                        LiteralMode::Sync => {
+                            // We need to wait for a command continuation request response from the server
+                            progress.blocked_reason =
+                                Some(SendCommandBlockedReason::WaitForLiteralAck {
+                                    data,
+                                    received_continue: false,
+                                });
+                            break true;
+                        }
+                        LiteralMode::NonSync => self.write_buffer.extend(data),
+                    },
                 }
             } else {
                 break false;
