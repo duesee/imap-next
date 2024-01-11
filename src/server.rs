@@ -6,7 +6,7 @@ use imap_codec::{
     imap_types::{
         auth::AuthenticateData,
         command::{Command, CommandBody},
-        core::Text,
+        core::{LiteralMode, Text},
         response::{CommandContinuationRequest, Data, Greeting, Response, Status},
     },
     AuthenticateDataCodec, CommandCodec, GreetingCodec, ResponseCodec,
@@ -218,35 +218,62 @@ impl ServerFlow {
                     ReceiveEvent::DecodingFailure(CommandDecodeError::LiteralFound {
                         tag,
                         length,
-                        mode: _mode,
+                        mode,
                     }) => {
                         if length > self.options.max_literal_size {
-                            let discarded_bytes = state.discard_message();
+                            match mode {
+                                LiteralMode::Sync => {
+                                    // Inform the client that the literal was rejected.
 
-                            // Inform the client that the literal was rejected.
-                            // This should never fail because the text is not Base64.
-                            let status = Status::no(
-                                Some(tag),
-                                None,
-                                self.options.literal_reject_text.clone(),
-                            )
-                            .unwrap();
-                            self.send_response_state
-                                .enqueue(None, Response::Status(status));
+                                    // Unwrap: This should never fail because the text is not Base64.
+                                    let status = Status::no(
+                                        Some(tag),
+                                        None,
+                                        self.options.literal_reject_text.clone(),
+                                    )
+                                    .unwrap();
+                                    self.send_response_state
+                                        .enqueue(None, Response::Status(status));
 
-                            Err(ServerFlowError::LiteralTooLong { discarded_bytes })
+                                    let discarded_bytes = state.discard_message();
+
+                                    Err(ServerFlowError::LiteralTooLong { discarded_bytes })
+                                }
+                                LiteralMode::NonSync => {
+                                    // TODO: We can't (reliably) make the client stop sending data.
+                                    //       Some actions that come to mind:
+                                    //       * terminate the connection
+                                    //       * act as a "discard server", i.e., consume the full
+                                    //         literal w/o saving it, and answering with `BAD`
+                                    //       * ...
+                                    //
+                                    //       The LITERAL+ RFC has some recommendations.
+                                    let discarded_bytes = state.discard_message();
+
+                                    Err(ServerFlowError::LiteralTooLong { discarded_bytes })
+                                }
+                            }
                         } else {
                             state.start_literal(length);
 
-                            // Inform the client that the literal was accepted.
-                            // This should never fail because the text is not Base64.
-                            let cont = CommandContinuationRequest::basic(
-                                None,
-                                self.options.literal_accept_text.clone(),
-                            )
-                            .unwrap();
-                            self.send_response_state
-                                .enqueue(None, Response::CommandContinuationRequest(cont));
+                            match mode {
+                                LiteralMode::Sync => {
+                                    // Inform the client that the literal was accepted.
+
+                                    // Unwrap: This should never fail because the text is not Base64.
+                                    let cont = CommandContinuationRequest::basic(
+                                        None,
+                                        self.options.literal_accept_text.clone(),
+                                    )
+                                    .unwrap();
+                                    self.send_response_state
+                                        .enqueue(None, Response::CommandContinuationRequest(cont));
+                                }
+                                LiteralMode::NonSync => {
+                                    // We don't need to inform the client because non-sync literals
+                                    // are automatically accepted.
+                                }
+                            }
 
                             Ok(None)
                         }
