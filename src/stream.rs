@@ -1,8 +1,10 @@
 use std::{fmt::Debug, num::NonZeroUsize, pin::Pin};
 
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
+use imap_types::utils::escape_byte_string;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tracing::trace;
 
 // TODO: Reconsider this. Do we really need Stream + AnyStream? What is the smallest API that we need to expose?
 
@@ -22,7 +24,13 @@ impl AnyStream {
     ///
     /// Returns [`StreamError::Closed`] when no bytes could be read.
     pub async fn read(&mut self, read_buffer: &mut BytesMut) -> Result<NonZeroUsize, StreamError> {
+        let old_len = read_buffer.len();
         let byte_count = self.0.read_buf(read_buffer).await?;
+
+        trace!(
+            data = escape_byte_string(&read_buffer[old_len..]),
+            "io/read/raw"
+        );
 
         match NonZeroUsize::new(byte_count) {
             None => {
@@ -40,7 +48,12 @@ impl AnyStream {
     /// Returns [`StreamError::Closed`] when not all bytes could be written.
     pub async fn write_all(&mut self, write_buffer: &mut BytesMut) -> Result<(), StreamError> {
         while !write_buffer.is_empty() {
-            let byte_count = self.0.write_buf(write_buffer).await?;
+            let byte_count = self.0.write(write_buffer).await?;
+            trace!(
+                data = escape_byte_string(&write_buffer[..byte_count]),
+                "io/write/raw"
+            );
+            write_buffer.advance(byte_count);
 
             if byte_count == 0 {
                 // The result is 0 if the stream doesn't accept bytes anymore or the write buffer
