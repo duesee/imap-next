@@ -107,6 +107,7 @@ fn filter_capabilities(capabilities: NonEmptyVec<Capability>) -> NonEmptyVec<Cap
             Capability::Quota | Capability::QuotaRes(_) | Capability::QuotaSet => true,
             Capability::Move => true,
             Capability::LiteralPlus | Capability::LiteralMinus => true,
+            Capability::Unselect => true,
             _ => false,
         })
         .collect();
