@@ -84,11 +84,15 @@ impl Proxy<BoundState> {
                         }
                     };
 
-                    rustls::ServerConfig::builder()
+                    let mut config = rustls::ServerConfig::builder()
                         .with_safe_defaults()
                         .with_no_client_auth()
                         // Note: The name is misleading. We provide the full chain here.
-                        .with_single_cert(certificate_chain, leaf_key)?
+                        .with_single_cert(certificate_chain, leaf_key)?;
+
+                    config.alpn_protocols = vec![b"imap".to_vec()];
+
+                    config
                 };
 
                 // TODO: The acceptor should really be part of the proxy initialization.
