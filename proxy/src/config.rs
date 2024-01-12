@@ -87,14 +87,6 @@ pub enum Identity {
         /// Path to leaf key (in PEM format).
         leaf_key_path: String,
     },
-    // TODO(#57)
-    // /// PKCS #12 bundle.
-    // Pkcs12 {
-    //     /// Path to PKCS #12 bundle containing certificate chain and leaf key.
-    //     path: String,
-    //     /// (Optional) passphrase to unlock the PKCS #12 bundle.
-    //     passphrase: Option<String>,
-    // },
 }
 
 /// How to establish server connections?

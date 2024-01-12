@@ -373,8 +373,6 @@ impl<T: Task> TaskHandle<T> {
 
 #[derive(Debug)]
 pub struct TaskToken {
-    // TODO(#53): Bind this token to a `Scheduler` instance.
-    //            Make sure invariants can't be bypassed by creating a second scheduler.
     handle: ClientFlowCommandHandle,
     output: Option<Box<dyn Any>>,
 }

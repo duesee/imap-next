@@ -420,8 +420,11 @@ where
                 for fragment in entry.fragments {
                     let data = match fragment {
                         Fragment::Line { data } => data,
-                        // TODO: Handle `LITERAL{+,-}`.
-                        Fragment::Literal { data, mode: _mode } => data,
+                        // Note: The server doesn't need to wait before sending a literal.
+                        //       Thus, non-sync literals doesn't make sense here.
+                        //       This is currently an issue in imap-codec,
+                        //       see https://github.com/duesee/imap-codec/issues/332
+                        Fragment::Literal { data, .. } => data,
                     };
                     self.write_buffer.extend(data);
                 }
