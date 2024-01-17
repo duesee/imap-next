@@ -311,7 +311,7 @@ pub enum SendCommandEvent<K> {
     CommandAuthenticateStarted { key: K },
 }
 
-// TODO: Better name?
+// TODO(#105)
 #[derive(Debug)]
 pub enum SendCommandKind {
     Regular {
@@ -348,6 +348,7 @@ enum SendCommandBlockedReason {
         // Was the literal already acknowledged by a `Continue` from the server?
         received_continue: bool,
     },
+    // TODO(#105)
     WaitForAuthenticateData {
         // Was the authenticate data already requested by the server?
         received_continue: bool,
