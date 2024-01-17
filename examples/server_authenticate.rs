@@ -1,11 +1,11 @@
 use std::error::Error;
 
-use imap_codec::imap_types::response::{CommandContinuationRequest, Greeting, Status};
 use imap_flow::{
     server::{ServerFlow, ServerFlowEvent, ServerFlowOptions},
     stream::AnyStream,
     types::CommandAuthenticate,
 };
+use imap_types::response::{CommandContinuationRequest, Greeting, Status};
 use tokio::net::TcpListener;
 
 #[tokio::main(flavor = "current_thread")]

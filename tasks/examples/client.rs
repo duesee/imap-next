@@ -1,8 +1,8 @@
-use imap_codec::imap_types::response::{Response, Status};
 use imap_flow::{
     client::{ClientFlow, ClientFlowOptions},
     stream::AnyStream,
 };
+use imap_types::response::{Response, Status};
 use tasks::{
     tasks::{AuthenticatePlainTask, CapabilityTask, LogoutTask},
     Scheduler, SchedulerEvent,

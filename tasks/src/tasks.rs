@@ -4,7 +4,7 @@
 
 use std::borrow::Cow;
 
-use imap_codec::imap_types::{
+use imap_types::{
     auth::{AuthMechanism, AuthenticateData},
     command::CommandBody,
     core::NonEmptyVec,
