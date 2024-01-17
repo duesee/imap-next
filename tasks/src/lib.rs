@@ -242,6 +242,10 @@ impl Scheduler {
                         return Ok(SchedulerEvent::TaskFinished(TaskToken { handle, output }));
                     }
                 },
+                ClientFlowEvent::IdleCommandSent { .. } => todo!(),
+                ClientFlowEvent::IdleAccepted { .. } => todo!(),
+                ClientFlowEvent::IdleRejected { .. } => todo!(),
+                ClientFlowEvent::IdleDoneSent { .. } => todo!(),
             }
         }
     }
