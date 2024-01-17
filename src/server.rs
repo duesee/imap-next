@@ -17,7 +17,7 @@ use thiserror::Error;
 use crate::{
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveEvent, ReceiveState},
-    send_response::SendResponseState,
+    send_response::{SendResponseEvent, SendResponseState},
     stream::{AnyStream, StreamError},
     types::CommandAuthenticate,
 };
@@ -70,8 +70,10 @@ impl ServerFlow {
             SendResponseState::new(GreetingCodec::default(), write_buffer);
         send_greeting_state.enqueue((), greeting);
         let greeting = loop {
-            if let Some(((), greeting)) = send_greeting_state.progress(&mut stream).await? {
-                break greeting;
+            if let Some(SendResponseEvent { response, .. }) =
+                send_greeting_state.progress(&mut stream).await?
+            {
+                break response;
             }
         };
 
@@ -166,11 +168,14 @@ impl ServerFlow {
 
     async fn progress_send(&mut self) -> Result<Option<ServerFlowEvent>, ServerFlowError> {
         match self.send_response_state.progress(&mut self.stream).await? {
-            Some((Some(handle), response)) => {
+            Some(SendResponseEvent {
+                key: Some(handle),
+                response,
+            }) => {
                 // A response was sucessfully sent, inform the caller
                 Ok(Some(ServerFlowEvent::ResponseSent { handle, response }))
             }
-            Some((None, _)) => {
+            Some(SendResponseEvent { key: None, .. }) => {
                 // An internally created response was sent, don't inform the caller
                 Ok(None)
             }
