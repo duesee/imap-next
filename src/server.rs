@@ -1,15 +1,16 @@
-use std::fmt::Debug;
+use std::{convert::Infallible, fmt::Debug, future::pending};
 
 use bytes::BytesMut;
 use imap_codec::{
-    decode::{AuthenticateDataDecodeError, CommandDecodeError},
+    decode::{AuthenticateDataDecodeError, CommandDecodeError, Decoder, IdleDoneDecodeError},
     imap_types::{
         auth::AuthenticateData,
         command::{Command, CommandBody},
-        core::{LiteralMode, Text},
+        core::{LiteralMode, Tag, Text},
+        extensions::idle::IdleDone,
         response::{CommandContinuationRequest, Data, Greeting, Response, Status},
     },
-    AuthenticateDataCodec, CommandCodec, GreetingCodec, ResponseCodec,
+    AuthenticateDataCodec, CommandCodec, GreetingCodec, IdleDoneCodec, ResponseCodec,
 };
 use thiserror::Error;
 
@@ -207,6 +208,14 @@ impl ServerFlow {
                                     },
                                 }))
                             }
+                            CommandBody::Idle => {
+                                self.receive_command_state
+                                    .change_state(NextExpectedMessage::IdleAccept);
+
+                                Ok(Some(ServerFlowEvent::IdleCommandReceived {
+                                    tag: command.tag,
+                                }))
+                            }
                             body => Ok(Some(ServerFlowEvent::CommandReceived {
                                 command: Command {
                                     tag: command.tag,
@@ -311,6 +320,32 @@ impl ServerFlow {
                     }
                 }
             }
+            ServerReceiveState::IdleAccept(_) => {
+                // We block infinitely because we don't expect any message here.
+                // Instead the server flow user should drop this future and call
+                // `idle_accept` or `idle_reject`.
+                pending().await
+            }
+            ServerReceiveState::IdleDone(state) => match state.progress(&mut self.stream).await? {
+                ReceiveEvent::DecodingSuccess(IdleDone) => {
+                    state.finish_message();
+
+                    self.receive_command_state
+                        .change_state(NextExpectedMessage::Command);
+
+                    Ok(Some(ServerFlowEvent::IdleDoneReceived))
+                }
+                ReceiveEvent::DecodingFailure(
+                    IdleDoneDecodeError::Failed | IdleDoneDecodeError::Incomplete,
+                ) => {
+                    let discarded_bytes = state.discard_message();
+                    Err(ServerFlowError::MalformedMessage { discarded_bytes })
+                }
+                ReceiveEvent::ExpectedCrlfGotLf => {
+                    let discarded_bytes = state.discard_message();
+                    Err(ServerFlowError::ExpectedCrlfGotLf { discarded_bytes })
+                }
+            },
             ServerReceiveState::Dummy => {
                 unreachable!()
             }
@@ -345,18 +380,54 @@ impl ServerFlow {
             Err(())
         }
     }
+
+    pub fn idle_accept(
+        &mut self,
+        continuation_request: CommandContinuationRequest<'static>,
+    ) -> Result<ServerFlowResponseHandle, CommandContinuationRequest<'static>> {
+        if let ServerReceiveState::IdleAccept(_) = &mut self.receive_command_state {
+            let handle = self.enqueue_continuation(continuation_request);
+
+            self.receive_command_state
+                .change_state(NextExpectedMessage::IdleDone);
+
+            Ok(handle)
+        } else {
+            Err(continuation_request)
+        }
+    }
+
+    pub fn idle_reject(
+        &mut self,
+        status: Status<'static>,
+    ) -> Result<ServerFlowResponseHandle, Status<'static>> {
+        if let ServerReceiveState::IdleAccept(_) = &mut self.receive_command_state {
+            let handle = self.enqueue_status(status);
+
+            self.receive_command_state
+                .change_state(NextExpectedMessage::Command);
+
+            Ok(handle)
+        } else {
+            Err(status)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 enum NextExpectedMessage {
     Command,
     AuthenticateData,
+    IdleAccept,
+    IdleDone,
 }
 
 #[derive(Debug)]
 enum ServerReceiveState {
     Command(ReceiveState<CommandCodec>),
     AuthenticateData(ReceiveState<AuthenticateDataCodec>),
+    IdleAccept(ReceiveState<NoCodec>),
+    IdleDone(ReceiveState<IdleDoneCodec>),
     // This state is set only temporarily during `ServerReceiveState::change_state`
     Dummy,
 }
@@ -366,20 +437,44 @@ impl ServerReceiveState {
         // NOTE: This function MUST NOT panic. Otherwise the dummy state will remain indefinitely.
         let old_state = std::mem::replace(self, ServerReceiveState::Dummy);
         let new_state = match next_expected_message {
-            NextExpectedMessage::Command => ServerReceiveState::Command(match old_state {
-                ServerReceiveState::Command(state) => state,
-                ServerReceiveState::AuthenticateData(state) => {
-                    state.change_codec(CommandCodec::default())
-                }
-                ServerReceiveState::Dummy => unreachable!(),
-            }),
+            NextExpectedMessage::Command => {
+                let codec = CommandCodec::default();
+                Self::Command(match old_state {
+                    Self::Command(state) => state,
+                    Self::AuthenticateData(state) => state.change_codec(codec),
+                    Self::IdleAccept(state) => state.change_codec(codec),
+                    Self::IdleDone(state) => state.change_codec(codec),
+                    Self::Dummy => unreachable!(),
+                })
+            }
             NextExpectedMessage::AuthenticateData => {
-                ServerReceiveState::AuthenticateData(match old_state {
-                    ServerReceiveState::Command(state) => {
-                        state.change_codec(AuthenticateDataCodec::default())
-                    }
-                    ServerReceiveState::AuthenticateData(state) => state,
-                    ServerReceiveState::Dummy => unreachable!(),
+                let codec = AuthenticateDataCodec::default();
+                Self::AuthenticateData(match old_state {
+                    Self::Command(state) => state.change_codec(codec),
+                    Self::AuthenticateData(state) => state,
+                    Self::IdleAccept(state) => state.change_codec(codec),
+                    Self::IdleDone(state) => state.change_codec(codec),
+                    Self::Dummy => unreachable!(),
+                })
+            }
+            NextExpectedMessage::IdleAccept => {
+                let codec = NoCodec::default();
+                Self::IdleAccept(match old_state {
+                    Self::Command(state) => state.change_codec(codec),
+                    Self::AuthenticateData(state) => state.change_codec(codec),
+                    Self::IdleAccept(state) => state,
+                    Self::IdleDone(state) => state.change_codec(codec),
+                    Self::Dummy => todo!(),
+                })
+            }
+            NextExpectedMessage::IdleDone => {
+                let codec = IdleDoneCodec::default();
+                Self::IdleDone(match old_state {
+                    Self::Command(state) => state.change_codec(codec),
+                    Self::AuthenticateData(state) => state.change_codec(codec),
+                    Self::IdleAccept(state) => state.change_codec(codec),
+                    Self::IdleDone(state) => state,
+                    Self::Dummy => todo!(),
                 })
             }
         };
@@ -444,7 +539,13 @@ pub enum ServerFlowEvent {
     /// Note, too: The client may abort the authentication by using [`AuthenticateData::Cancel`].
     /// Make sure to honor the client's request to not end up in an infinite loop. It's up to the
     /// server to end the authentication flow.
-    AuthenticateDataReceived { authenticate_data: AuthenticateData },
+    AuthenticateDataReceived {
+        authenticate_data: AuthenticateData,
+    },
+    IdleCommandReceived {
+        tag: Tag<'static>,
+    },
+    IdleDoneReceived,
 }
 
 #[derive(Debug, Error)]
@@ -457,4 +558,22 @@ pub enum ServerFlowError {
     MalformedMessage { discarded_bytes: Box<[u8]> },
     #[error("Literal was rejected because it was too long")]
     LiteralTooLong { discarded_bytes: Box<[u8]> },
+}
+
+/// A dummy codec we use for technical reasons in [`ServerReceiveState::IdleAccept`]
+/// because we don't know the next codec yet.
+#[derive(Debug, Default)]
+pub struct NoCodec {}
+
+impl Decoder for NoCodec {
+    type Message<'a> = ();
+
+    type Error<'a> = Infallible;
+
+    fn decode<'a>(
+        &self,
+        input: &'a [u8],
+    ) -> Result<(&'a [u8], Self::Message<'a>), Self::Error<'a>> {
+        Ok((input, ()))
+    }
 }

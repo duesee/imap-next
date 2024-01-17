@@ -11,9 +11,10 @@ use imap_codec::{
             Tagged,
         },
     },
-    AuthenticateDataCodec, CommandCodec, GreetingCodec, ResponseCodec,
+    AuthenticateDataCodec, CommandCodec, GreetingCodec, IdleDoneCodec, ResponseCodec,
 };
 use thiserror::Error;
+use tracing::warn;
 
 use crate::{
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
@@ -82,6 +83,7 @@ impl ClientFlow {
         let send_command_state = SendCommandState::new(
             CommandCodec::default(),
             AuthenticateDataCodec::default(),
+            IdleDoneCodec::default(),
             BytesMut::new(),
         );
 
@@ -149,6 +151,12 @@ impl ClientFlow {
             Some(SendCommandEvent::CommandAuthenticateStarted { key: handle }) => {
                 Ok(Some(ClientFlowEvent::AuthenticateStarted { handle }))
             }
+            Some(SendCommandEvent::IdleStarted { key: handle }) => {
+                Ok(Some(ClientFlowEvent::IdleCommandSent { handle }))
+            }
+            Some(SendCommandEvent::IdleTerminated { key: handle }) => {
+                Ok(Some(ClientFlowEvent::IdleDoneSent { handle }))
+            }
             None => Ok(None),
         }
     }
@@ -208,6 +216,9 @@ impl ClientFlow {
                                 command_authenticate,
                                 status,
                             },
+                            FinishCommandResult::IdleRejected { handle } => {
+                                ClientFlowEvent::IdleRejected { handle, status }
+                            }
                         }
                     } else {
                         ClientFlowEvent::StatusReceived { status }
@@ -223,6 +234,11 @@ impl ClientFlow {
                         break None;
                     } else if let Some(&handle) = self.send_command_state.continue_authenticate() {
                         break Some(ClientFlowEvent::ContinuationAuthenticateReceived {
+                            handle,
+                            continuation,
+                        });
+                    } else if let Some(&handle) = self.send_command_state.continue_idle() {
+                        break Some(ClientFlowEvent::IdleAccepted {
                             handle,
                             continuation,
                         });
@@ -301,6 +317,30 @@ impl ClientFlow {
                     None
                 }
             }
+            SendCommandKind::Idle { tag: idle_tag, .. } => {
+                let removed_command = match status {
+                    Status::Tagged(Tagged {
+                        tag,
+                        body: StatusBody { kind, .. },
+                        ..
+                    }) if tag == idle_tag => {
+                        if matches!(kind, StatusKind::Ok | StatusKind::Bad) {
+                            warn!(got=?status, "Expected command continuation request response or NO command completion result");
+                            warn!("Interpreting as IDLE rejected");
+                        }
+
+                        // TODO: Don't match status if idle already accepted
+                        self.send_command_state.remove_command_in_progress()
+                    }
+                    _ => None,
+                };
+
+                if let Some((handle, SendCommandKind::Idle { .. })) = removed_command {
+                    Some(FinishCommandResult::IdleRejected { handle })
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -311,6 +351,10 @@ impl ClientFlow {
         self.send_command_state
             .continue_authenticate_with_data(authenticate_data)
             .copied()
+    }
+
+    pub fn idle_done(&mut self) -> Option<ClientFlowCommandHandle> {
+        self.send_command_state.idle_done().copied()
     }
 }
 
@@ -326,6 +370,9 @@ enum FinishCommandResult {
     AuthenticationRejected {
         handle: ClientFlowCommandHandle,
         command_authenticate: CommandAuthenticate,
+    },
+    IdleRejected {
+        handle: ClientFlowCommandHandle,
     },
 }
 
@@ -403,6 +450,20 @@ pub enum ClientFlowEvent {
         handle: ClientFlowCommandHandle,
         command_authenticate: CommandAuthenticate,
         status: Status<'static>,
+    },
+    IdleCommandSent {
+        handle: ClientFlowCommandHandle,
+    },
+    IdleAccepted {
+        handle: ClientFlowCommandHandle,
+        continuation: CommandContinuationRequest<'static>,
+    },
+    IdleRejected {
+        handle: ClientFlowCommandHandle,
+        status: Status<'static>,
+    },
+    IdleDoneSent {
+        handle: ClientFlowCommandHandle,
     },
     /// Server [`Data`] received.
     DataReceived {
