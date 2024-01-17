@@ -109,6 +109,7 @@ fn filter_capabilities(capabilities: NonEmptyVec<Capability>) -> NonEmptyVec<Cap
             Capability::LiteralPlus | Capability::LiteralMinus => true,
             Capability::Unselect => true,
             Capability::Id => true,
+            Capability::Idle => true,
             _ => false,
         })
         .collect();
