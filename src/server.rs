@@ -422,7 +422,9 @@ pub enum ServerFlowEvent {
         response: Response<'static>,
     },
     /// Command received.
-    CommandReceived { command: Command<'static> },
+    CommandReceived {
+        command: Command<'static>,
+    },
     /// Command AUTHENTICATE received.
     ///
     /// Note: The server MUST call [`ServerFlow::authenticate_continue`] (if it needs more data for

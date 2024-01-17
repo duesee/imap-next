@@ -270,7 +270,7 @@ impl ClientFlow {
                     }) if tag == &command_authenticate.tag => self
                         .send_command_state
                         .remove_command_in_progress()
-                        .zip(Some(kind.clone())),
+                        .zip(Some(*kind)),
                     _ => None,
                 };
 
