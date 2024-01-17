@@ -17,7 +17,7 @@ use thiserror::Error;
 use crate::{
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveEvent, ReceiveState},
-    send::SendResponseState,
+    send_response::SendResponseState,
     stream::{AnyStream, StreamError},
     types::CommandAuthenticate,
 };
