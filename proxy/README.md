@@ -121,6 +121,22 @@ openssl s_client -verify_return_error -crlf -connect <host>:<port>
 
 Note: `openssl s_client` should only really be used for testing.
 
+# Supported authentication mechanisms
+
+The proxy forwards authentication messages unchanged, and uses an [allow-list](https://github.com/duesee/imap-flow/blob/0ccd9384d36ae5aecb15417aeedf772543d9a661/proxy/src/util.rs#L120C4-L120C31)
+of capabilities and authentication mechanisms to exclude everything it doesn't understand.
+
+Some authentication mechanisms "bind" to the TLS connection ("channel binding") and will fail when proxied.
+These are not proxyable by design -- at least without further ado -- and are filtered from the connection.
+
+| Authentication mechanism | Support                                |
+|--------------------------|----------------------------------------|
+| LOGIN                    | supported                              |
+| PLAIN                    | supported                              |
+| XOAUTH2                  | supported                              |
+| SCRAM-*                  | supported                              |
+| SCRAM-*-PLUS             | not supported (due to channel binding) |
+| Others                   | not supported (yet)                    |
 
 # Current purpose
 
