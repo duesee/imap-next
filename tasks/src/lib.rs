@@ -1,3 +1,5 @@
+pub mod tasks;
+
 use std::{
     any::Any,
     collections::VecDeque,
@@ -14,8 +16,6 @@ use imap_codec::imap_types::{
 use imap_flow::client::{ClientFlow, ClientFlowCommandHandle, ClientFlowError, ClientFlowEvent};
 use tag_generator::TagGenerator;
 use thiserror::Error;
-
-pub mod tasks;
 
 /// Tells how a specific IMAP [`Command`] is processed.
 ///
