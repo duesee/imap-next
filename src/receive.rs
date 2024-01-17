@@ -5,7 +5,7 @@ use imap_codec::decode::Decoder;
 use crate::stream::{AnyStream, StreamError};
 
 #[derive(Debug)]
-pub struct ReceiveState<C: Decoder> {
+pub struct ReceiveState<C> {
     codec: C,
     crlf_relaxed: bool,
     next_fragment: NextFragment,
@@ -18,7 +18,7 @@ pub struct ReceiveState<C: Decoder> {
     read_buffer: BytesMut,
 }
 
-impl<C: Decoder> ReceiveState<C> {
+impl<C> ReceiveState<C> {
     pub fn new(codec: C, crlf_relaxed: bool, read_buffer: BytesMut) -> Self {
         Self {
             codec,
@@ -48,6 +48,7 @@ impl<C: Decoder> ReceiveState<C> {
 
     pub async fn progress(&mut self, stream: &mut AnyStream) -> Result<ReceiveEvent<C>, StreamError>
     where
+        C: Decoder,
         for<'a> C::Message<'a>: IntoBoundedStatic<Static = C::Message<'static>>,
         for<'a> C::Error<'a>: IntoBoundedStatic<Static = C::Error<'static>>,
     {
@@ -70,6 +71,7 @@ impl<C: Decoder> ReceiveState<C> {
         stream: &mut AnyStream,
     ) -> Result<Option<ReceiveEvent<C>>, StreamError>
     where
+        C: Decoder,
         for<'a> C::Message<'a>: IntoBoundedStatic<Static = C::Message<'static>>,
         for<'a> C::Error<'a>: IntoBoundedStatic<Static = C::Error<'static>>,
     {
@@ -123,7 +125,7 @@ impl<C: Decoder> ReceiveState<C> {
         Ok(())
     }
 
-    pub fn change_codec<D: Decoder>(self, codec: D) -> ReceiveState<D> {
+    pub fn change_codec<D>(self, codec: D) -> ReceiveState<D> {
         ReceiveState::new(codec, self.crlf_relaxed, self.read_buffer)
     }
 }

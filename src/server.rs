@@ -1,8 +1,8 @@
-use std::{convert::Infallible, fmt::Debug, future::pending};
+use std::{fmt::Debug, future::pending};
 
 use bytes::BytesMut;
 use imap_codec::{
-    decode::{AuthenticateDataDecodeError, CommandDecodeError, Decoder, IdleDoneDecodeError},
+    decode::{AuthenticateDataDecodeError, CommandDecodeError, IdleDoneDecodeError},
     AuthenticateDataCodec, CommandCodec, GreetingCodec, IdleDoneCodec, ResponseCodec,
 };
 use imap_types::{
@@ -458,7 +458,7 @@ impl ServerReceiveState {
                 })
             }
             NextExpectedMessage::IdleAccept => {
-                let codec = NoCodec::default();
+                let codec = NoCodec;
                 Self::IdleAccept(match old_state {
                     Self::Command(state) => state.change_codec(codec),
                     Self::AuthenticateData(state) => state.change_codec(codec),
@@ -560,20 +560,6 @@ pub enum ServerFlowError {
     LiteralTooLong { discarded_bytes: Box<[u8]> },
 }
 
-/// A dummy codec we use for technical reasons in [`ServerReceiveState::IdleAccept`]
-/// because we don't know the next codec yet.
-#[derive(Debug, Default)]
-pub struct NoCodec {}
-
-impl Decoder for NoCodec {
-    type Message<'a> = ();
-
-    type Error<'a> = Infallible;
-
-    fn decode<'a>(
-        &self,
-        input: &'a [u8],
-    ) -> Result<(&'a [u8], Self::Message<'a>), Self::Error<'a>> {
-        Ok((input, ()))
-    }
-}
+/// A dummy codec we use for technical reasons when we don't want to receive anything at all.
+#[derive(Debug)]
+struct NoCodec;
