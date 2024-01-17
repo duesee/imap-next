@@ -3,6 +3,7 @@ use std::{net::SocketAddr, sync::Arc};
 use colored::Colorize;
 use imap_codec::imap_types::{
     bounded_static::ToBoundedStatic,
+    command::{Command, CommandBody},
     core::Text,
     response::{Code, Status},
 };
@@ -303,6 +304,21 @@ fn handle_client_event(
                 .unwrap();
             // TODO: log handle
         }
+        ServerFlowEvent::IdleCommandReceived { tag } => {
+            let command = Command {
+                tag,
+                body: CommandBody::Idle,
+            };
+
+            trace!(command=%format!("{:?}", command).red(), role = "c2p", "|--> Received command (idle)");
+            let _handle = proxy_to_server.enqueue_command(command);
+            // TODO: log handle
+        }
+        ServerFlowEvent::IdleDoneReceived => {
+            trace!(role = "c2p", "|--> Received done (idle)");
+            let _handle = proxy_to_server.idle_done();
+            // TODO: log handle
+        }
     }
 
     ControlFlow::Continue
@@ -398,6 +414,36 @@ fn handle_server_event(
             trace!(response=%format!("{:?}", continuation).blue(), role = "s2p", "<--| Received continuation");
             util::filter_capabilities_in_continuation(&mut continuation);
             let _handle = client_to_proxy.enqueue_continuation(continuation);
+            // TODO: log handle
+        }
+        ClientFlowEvent::IdleCommandSent { handle: _handle } => {
+            trace!(role = "p2s", "---> Forwarded command (idle)");
+            // TODO: log handle
+        }
+        ClientFlowEvent::IdleAccepted {
+            handle: _handle,
+            continuation,
+        } => {
+            // TODO: log handle
+            trace!(
+                role = "s2p",
+                ?continuation,
+                "<--| Received continuation (idle)"
+            );
+            let _handle2 = client_to_proxy.idle_accept(continuation);
+            // TODO: log handle2
+        }
+        ClientFlowEvent::IdleRejected {
+            handle: _handle,
+            status,
+        } => {
+            // TODO: log handle
+            trace!(role = "s2p", ?status, "<--| Received status (idle)");
+            let _handle2 = client_to_proxy.idle_reject(status);
+            // TODO: log handle2
+        }
+        ClientFlowEvent::IdleDoneSent { handle: _handle } => {
+            trace!(role = "p2s", "---> Forwarded done (idle)");
             // TODO: log handle
         }
     }
