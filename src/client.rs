@@ -19,7 +19,7 @@ use tracing::warn;
 use crate::{
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveEvent, ReceiveState},
-    send::{SendCommandEvent, SendCommandKind, SendCommandState},
+    send_command::{SendCommandEvent, SendCommandKind, SendCommandState},
     stream::{AnyStream, StreamError},
     types::CommandAuthenticate,
 };
