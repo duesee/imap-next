@@ -143,7 +143,7 @@ impl<K: Copy> SendCommandState<K> {
         };
         let SendCommandBlockedReason::WaitForAuthenticateData {
             received_continue,
-            data,
+            authenticate_data: current_authenticate_data,
         } = literal_progress
         else {
             return Err(authenticate_data);
@@ -151,11 +151,11 @@ impl<K: Copy> SendCommandState<K> {
         if !*received_continue {
             return Err(authenticate_data);
         }
-        if data.is_some() {
+        if current_authenticate_data.is_some() {
             return Err(authenticate_data);
         }
 
-        *data = Some(authenticate_data);
+        *current_authenticate_data = Some(authenticate_data);
 
         Ok(&write_progress.key)
     }
@@ -258,10 +258,10 @@ impl<K: Copy> SendCommandState<K> {
                 }
                 SendCommandBlockedReason::WaitForAuthenticateData {
                     received_continue,
-                    data,
+                    authenticate_data,
                 } => {
-                    match data {
-                        Some(data) => {
+                    match authenticate_data {
+                        Some(authenticate_data) => {
                             // The data can only be set after receiving a continue from server
                             assert!(received_continue);
 
@@ -269,7 +269,7 @@ impl<K: Copy> SendCommandState<K> {
                             // client-flow user. We can send the auth data now.
                             progress
                                 .next_fragments
-                                .extend(self.authenticate_data_codec.encode(&data))
+                                .extend(self.authenticate_data_codec.encode(&authenticate_data))
                         }
                         None => {
                             // Delay this because we still wait for the client flow user to call
@@ -277,7 +277,7 @@ impl<K: Copy> SendCommandState<K> {
                             progress.blocked_reason =
                                 Some(SendCommandBlockedReason::WaitForAuthenticateData {
                                     received_continue,
-                                    data,
+                                    authenticate_data,
                                 });
 
                             return Ok(None);
@@ -358,7 +358,7 @@ impl<K: Copy> SendCommandState<K> {
                 }
                 SendCommandKind::Authenticate {
                     command_authenticate,
-                    started,
+                    started: was_started,
                 } => {
                     // Authenticate is only treated as completed after receiving a "OK" from server
                     let progress = self.send_progress.insert(SendCommandProgress {
@@ -368,14 +368,16 @@ impl<K: Copy> SendCommandState<K> {
                         },
                         blocked_reason: Some(SendCommandBlockedReason::WaitForAuthenticateData {
                             received_continue: false,
-                            data: None,
+                            authenticate_data: None,
                         }),
                         ..progress
                     });
 
-                    if started {
+                    if was_started {
+                        // Command was already sent before
                         Ok(None)
                     } else {
+                        // Command was sent just now
                         Ok(Some(SendCommandEvent::CommandAuthenticateStarted {
                             key: progress.key,
                         }))
@@ -459,7 +461,7 @@ enum SendCommandBlockedReason {
         received_continue: bool,
         // The authenticate data provided by the client flow user.
         // Should only be set when requested by the server.
-        data: Option<AuthenticateData>,
+        authenticate_data: Option<AuthenticateData>,
     },
     Idle {
         // Has the server already sent a `Continue`?

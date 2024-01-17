@@ -55,7 +55,6 @@ pub struct ServerFlow {
 
     handle_generator: HandleGenerator<ServerFlowResponseHandle>,
     send_response_state: SendResponseState<ResponseCodec, Option<ServerFlowResponseHandle>>,
-    next_expected_message: NextExpectedMessage,
     receive_command_state: ServerReceiveState,
 }
 
@@ -86,7 +85,6 @@ impl ServerFlow {
             stream,
             options,
             handle_generator: HANDLE_GENERATOR_GENERATOR.generate(),
-            next_expected_message: NextExpectedMessage::Command,
             send_response_state,
             receive_command_state: ServerReceiveState::Command(receive_command_state),
         };
@@ -195,10 +193,8 @@ impl ServerFlow {
                                 mechanism,
                                 initial_response,
                             } => {
-                                self.next_expected_message = NextExpectedMessage::AuthenticateData;
-
                                 self.receive_command_state
-                                    .change_state(self.next_expected_message);
+                                    .change_state(NextExpectedMessage::AuthenticateData);
 
                                 Ok(Some(ServerFlowEvent::CommandAuthenticateReceived {
                                     command_authenticate: CommandAuthenticate {
@@ -355,29 +351,28 @@ impl ServerFlow {
     pub fn authenticate_continue(
         &mut self,
         continuation: CommandContinuationRequest<'static>,
-    ) -> Result<ServerFlowResponseHandle, ()> {
+    ) -> Result<ServerFlowResponseHandle, CommandContinuationRequest<'static>> {
         if let ServerReceiveState::AuthenticateData { .. } = self.receive_command_state {
             let handle = self.enqueue_continuation(continuation);
             Ok(handle)
         } else {
-            Err(())
+            Err(continuation)
         }
     }
 
     pub fn authenticate_finish(
         &mut self,
         status: Status<'static>,
-    ) -> Result<ServerFlowResponseHandle, ()> {
+    ) -> Result<ServerFlowResponseHandle, Status<'static>> {
         if let ServerReceiveState::AuthenticateData(_) = &mut self.receive_command_state {
             let handle = self.enqueue_status(status);
-            self.next_expected_message = NextExpectedMessage::Command;
 
             self.receive_command_state
-                .change_state(self.next_expected_message);
+                .change_state(NextExpectedMessage::Command);
 
             Ok(handle)
         } else {
-            Err(())
+            Err(status)
         }
     }
 
