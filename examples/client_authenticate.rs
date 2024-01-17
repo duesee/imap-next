@@ -1,13 +1,13 @@
 use std::{collections::VecDeque, error::Error};
 
-use imap_codec::imap_types::{
-    auth::{AuthMechanism, AuthenticateData},
-    command::{Command, CommandBody},
-    secret::Secret,
-};
 use imap_flow::{
     client::{ClientFlow, ClientFlowEvent, ClientFlowOptions},
     stream::AnyStream,
+};
+use imap_types::{
+    auth::{AuthMechanism, AuthenticateData},
+    command::{Command, CommandBody},
+    secret::Secret,
 };
 use tag_generator::TagGenerator;
 use tokio::net::TcpStream;

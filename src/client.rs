@@ -3,15 +3,15 @@ use std::fmt::Debug;
 use bytes::BytesMut;
 use imap_codec::{
     decode::{GreetingDecodeError, ResponseDecodeError},
-    imap_types::{
-        auth::AuthenticateData,
-        command::Command,
-        response::{
-            CommandContinuationRequest, Data, Greeting, Response, Status, StatusBody, StatusKind,
-            Tagged,
-        },
-    },
     AuthenticateDataCodec, CommandCodec, GreetingCodec, IdleDoneCodec, ResponseCodec,
+};
+use imap_types::{
+    auth::AuthenticateData,
+    command::Command,
+    response::{
+        CommandContinuationRequest, Data, Greeting, Response, Status, StatusBody, StatusKind,
+        Tagged,
+    },
 };
 use thiserror::Error;
 use tracing::warn;
@@ -422,7 +422,7 @@ pub enum ClientFlowEvent {
         ///
         /// Note: [`ClientFlow`] already handled this [`Status`] but it might still have
         /// useful information that could be logged or displayed to the user
-        /// (e.g. [`Code::Alert`](imap_codec::imap_types::response::Code::Alert)).
+        /// (e.g. [`Code::Alert`](imap_types::response::Code::Alert)).
         status: Status<'static>,
     },
     AuthenticateStarted {

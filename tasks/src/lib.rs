@@ -7,13 +7,13 @@ use std::{
     marker::PhantomData,
 };
 
-use imap_codec::imap_types::{
+use imap_flow::client::{ClientFlow, ClientFlowCommandHandle, ClientFlowError, ClientFlowEvent};
+use imap_types::{
     auth::AuthenticateData,
     command::{Command, CommandBody},
     core::Tag,
     response::{Bye, CommandContinuationRequest, Data, Response, Status, StatusBody, Tagged},
 };
-use imap_flow::client::{ClientFlow, ClientFlowCommandHandle, ClientFlowError, ClientFlowEvent};
 use tag_generator::TagGenerator;
 use thiserror::Error;
 

@@ -10,6 +10,7 @@ argh = "0.1.12"
 colored = "2.0.4"
 imap-codec = { version = "2.0.0", features = ["bounded-static", "quirk_crlf_relaxed", "ext_id"] }
 imap-flow = { path = ".." }
+imap-types = { version = "2.0.0", features = ["bounded-static", "ext_id"] }
 rustls = "0.21.7"
 rustls-pemfile = "2.0.0-alpha.1"
 serde = { version = "1.0.171", features = ["derive"] }

@@ -1,16 +1,16 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use colored::Colorize;
-use imap_codec::imap_types::{
-    bounded_static::ToBoundedStatic,
-    command::{Command, CommandBody},
-    core::Text,
-    response::{Code, Status},
-};
 use imap_flow::{
     client::{ClientFlow, ClientFlowError, ClientFlowEvent, ClientFlowOptions},
     server::{ServerFlow, ServerFlowError, ServerFlowEvent, ServerFlowOptions},
     stream::AnyStream,
+};
+use imap_types::{
+    bounded_static::ToBoundedStatic,
+    command::{Command, CommandBody},
+    core::Text,
+    response::{Code, Status},
 };
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};

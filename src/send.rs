@@ -3,13 +3,13 @@ use std::{collections::VecDeque, fmt::Debug};
 use bytes::BytesMut;
 use imap_codec::{
     encode::{Encoder, Fragment},
-    imap_types::{
-        auth::AuthenticateData,
-        command::{Command, CommandBody},
-        core::{LiteralMode, Tag},
-        extensions::idle::IdleDone,
-    },
     AuthenticateDataCodec, CommandCodec, IdleDoneCodec,
+};
+use imap_types::{
+    auth::AuthenticateData,
+    command::{Command, CommandBody},
+    core::{LiteralMode, Tag},
+    extensions::idle::IdleDone,
 };
 
 use crate::{

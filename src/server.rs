@@ -3,14 +3,14 @@ use std::{convert::Infallible, fmt::Debug, future::pending};
 use bytes::BytesMut;
 use imap_codec::{
     decode::{AuthenticateDataDecodeError, CommandDecodeError, Decoder, IdleDoneDecodeError},
-    imap_types::{
-        auth::AuthenticateData,
-        command::{Command, CommandBody},
-        core::{LiteralMode, Tag, Text},
-        extensions::idle::IdleDone,
-        response::{CommandContinuationRequest, Data, Greeting, Response, Status},
-    },
     AuthenticateDataCodec, CommandCodec, GreetingCodec, IdleDoneCodec, ResponseCodec,
+};
+use imap_types::{
+    auth::AuthenticateData,
+    command::{Command, CommandBody},
+    core::{LiteralMode, Tag, Text},
+    extensions::idle::IdleDone,
+    response::{CommandContinuationRequest, Data, Greeting, Response, Status},
 };
 use thiserror::Error;
 

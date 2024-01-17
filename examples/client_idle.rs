@@ -1,13 +1,13 @@
 use std::io::BufRead;
 
-use imap_codec::imap_types::{
-    command::{Command, CommandBody},
-    core::Tag,
-    response::{Status, Tagged},
-};
 use imap_flow::{
     client::{ClientFlow, ClientFlowEvent, ClientFlowOptions},
     stream::AnyStream,
+};
+use imap_types::{
+    command::{Command, CommandBody},
+    core::Tag,
+    response::{Status, Tagged},
 };
 use tokio::{net::TcpStream, sync::mpsc::Receiver};
 
