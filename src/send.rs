@@ -6,9 +6,10 @@ use imap_codec::{
     imap_types::{
         auth::AuthenticateData,
         command::{Command, CommandBody},
-        core::LiteralMode,
+        core::{LiteralMode, Tag},
+        extensions::idle::IdleDone,
     },
-    AuthenticateDataCodec, CommandCodec,
+    AuthenticateDataCodec, CommandCodec, IdleDoneCodec,
 };
 
 use crate::{
@@ -20,6 +21,7 @@ use crate::{
 pub struct SendCommandState<K: Copy> {
     command_codec: CommandCodec,
     authenticate_data_codec: AuthenticateDataCodec,
+    idle_done_codec: IdleDoneCodec,
     // The commands that should be send.
     send_queue: VecDeque<SendCommandQueueEntry<K>>,
     // State of the command that is currently being sent.
@@ -33,11 +35,13 @@ impl<K: Copy> SendCommandState<K> {
     pub fn new(
         command_codec: CommandCodec,
         authenticate_data_codec: AuthenticateDataCodec,
+        idle_done_codec: IdleDoneCodec,
         write_buffer: BytesMut,
     ) -> Self {
         Self {
             command_codec,
             authenticate_data_codec,
+            idle_done_codec,
             send_queue: VecDeque::new(),
             send_progress: None,
             write_buffer,
@@ -56,6 +60,10 @@ impl<K: Copy> SendCommandState<K> {
                     mechanism,
                     initial_response,
                 },
+                started: false,
+            },
+            CommandBody::Idle => SendCommandKind::Idle {
+                tag: command.tag,
                 started: false,
             },
             body => SendCommandKind::Regular {
@@ -152,6 +160,50 @@ impl<K: Copy> SendCommandState<K> {
         Ok(&write_progress.key)
     }
 
+    pub fn continue_idle(&mut self) -> Option<&K> {
+        let write_progress = self.send_progress.as_mut()?;
+        let literal_progress = write_progress.blocked_reason.as_mut()?;
+        let SendCommandBlockedReason::Idle {
+            received_continue, ..
+        } = literal_progress
+        else {
+            return None;
+        };
+        if *received_continue {
+            return None;
+        }
+
+        *received_continue = true;
+
+        Some(&write_progress.key)
+    }
+
+    pub fn idle_done(&mut self) -> Option<&K> {
+        let Some(write_progress) = self.send_progress.as_mut() else {
+            return None;
+        };
+        let Some(literal_progress) = write_progress.blocked_reason.as_mut() else {
+            return None;
+        };
+        let SendCommandBlockedReason::Idle {
+            received_continue,
+            idle_done: current_idle_done,
+        } = literal_progress
+        else {
+            return None;
+        };
+        if !*received_continue {
+            return None;
+        }
+        if current_idle_done.is_some() {
+            return None;
+        }
+
+        *current_idle_done = Some(IdleDone);
+
+        Some(&write_progress.key)
+    }
+
     pub async fn progress(
         &mut self,
         stream: &mut AnyStream,
@@ -232,6 +284,34 @@ impl<K: Copy> SendCommandState<K> {
                         }
                     }
                 }
+                SendCommandBlockedReason::Idle {
+                    received_continue,
+                    idle_done,
+                } => {
+                    match idle_done {
+                        Some(done) => {
+                            // The `IdleDone` can only be set after receiving a `Continue`
+                            // from server
+                            assert!(received_continue);
+
+                            // We received a `Continue` from the server and the `IdleDone`
+                            // from the client-flow user. We can send the `IdleDone` now.
+                            progress
+                                .next_fragments
+                                .extend(self.idle_done_codec.encode(&done))
+                        }
+                        None => {
+                            // Delay this because we still wait for the client flow user to call
+                            // `idle_done`.
+                            progress.blocked_reason = Some(SendCommandBlockedReason::Idle {
+                                received_continue,
+                                idle_done,
+                            });
+
+                            return Ok(None);
+                        }
+                    }
+                }
             }
         }
 
@@ -301,6 +381,25 @@ impl<K: Copy> SendCommandState<K> {
                         }))
                     }
                 }
+                SendCommandKind::Idle {
+                    tag,
+                    started: was_started,
+                } => {
+                    if was_started {
+                        Ok(Some(SendCommandEvent::IdleTerminated { key: progress.key }))
+                    } else {
+                        let progress = self.send_progress.insert(SendCommandProgress {
+                            kind: SendCommandKind::Idle { tag, started: true },
+                            blocked_reason: Some(SendCommandBlockedReason::Idle {
+                                received_continue: false,
+                                idle_done: None,
+                            }),
+                            ..progress
+                        });
+
+                        Ok(Some(SendCommandEvent::IdleStarted { key: progress.key }))
+                    }
+                }
             }
         }
     }
@@ -309,6 +408,8 @@ impl<K: Copy> SendCommandState<K> {
 pub enum SendCommandEvent<K> {
     CommandSent { key: K, command: Command<'static> },
     CommandAuthenticateStarted { key: K },
+    IdleStarted { key: K },
+    IdleTerminated { key: K },
 }
 
 // TODO(#105)
@@ -319,6 +420,10 @@ pub enum SendCommandKind {
     },
     Authenticate {
         command_authenticate: CommandAuthenticate,
+        started: bool,
+    },
+    Idle {
+        tag: Tag<'static>,
         started: bool,
     },
 }
@@ -355,6 +460,13 @@ enum SendCommandBlockedReason {
         // The authenticate data provided by the client flow user.
         // Should only be set when requested by the server.
         data: Option<AuthenticateData>,
+    },
+    Idle {
+        // Has the server already sent a `Continue`?
+        received_continue: bool,
+        // The `IdleDone` provided by the client flow user.
+        // Should only be set after a `Continue` was received from the server.
+        idle_done: Option<IdleDone>,
     },
 }
 
