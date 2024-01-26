@@ -2,7 +2,7 @@ use std::{fs::File, io::BufReader, path::Path};
 
 use imap_types::{
     auth::AuthMechanism,
-    core::NonEmptyVec,
+    core::Vec1,
     response::{
         Bye, Capability, Code, CommandContinuationRequest, CommandContinuationRequestBasic, Data,
         Greeting, Status, StatusBody, Tagged,
@@ -97,7 +97,7 @@ pub fn filter_capabilities_in_continuation(continuation: &mut CommandContinuatio
 }
 
 // Remove unsupported capabilities in a capability list.
-fn filter_capabilities(capabilities: NonEmptyVec<Capability>) -> NonEmptyVec<Capability> {
+fn filter_capabilities(capabilities: Vec1<Capability>) -> Vec1<Capability> {
     let filtered: Vec<_> = capabilities
         .into_iter()
         .filter(|capability| match capability {
@@ -114,7 +114,7 @@ fn filter_capabilities(capabilities: NonEmptyVec<Capability>) -> NonEmptyVec<Cap
         })
         .collect();
 
-    NonEmptyVec::try_from(filtered).unwrap_or(NonEmptyVec::from(Capability::Imap4Rev1))
+    Vec1::try_from(filtered).unwrap_or(Vec1::from(Capability::Imap4Rev1))
 }
 
 fn is_auth_mechanism_proxyable(auth_mechanism: &AuthMechanism) -> bool {

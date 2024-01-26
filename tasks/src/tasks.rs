@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use imap_types::{
     auth::{AuthMechanism, AuthenticateData},
     command::CommandBody,
-    core::NonEmptyVec,
+    core::Vec1,
     response::{Bye, Capability, CommandContinuationRequest, Data, StatusBody, StatusKind},
     secret::Secret,
 };
@@ -17,11 +17,11 @@ use crate::Task;
 #[derive(Default)]
 pub struct CapabilityTask {
     /// We use this as scratch space.
-    capabilities: Option<NonEmptyVec<Capability<'static>>>,
+    capabilities: Option<Vec1<Capability<'static>>>,
 }
 
 impl Task for CapabilityTask {
-    type Output = Result<NonEmptyVec<Capability<'static>>, &'static str>;
+    type Output = Result<Vec1<Capability<'static>>, &'static str>;
 
     fn command_body(&self) -> CommandBody<'static> {
         CommandBody::Capability
