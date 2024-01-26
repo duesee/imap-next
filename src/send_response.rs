@@ -62,7 +62,7 @@ where
                 assert!(self.write_buffer.is_empty());
 
                 let Some(queued_response) = self.queued_responses.pop_front() else {
-                    // There is currently no response that need to be sent
+                    // There is currently no response that needs to be sent
                     return Ok(None);
                 };
 

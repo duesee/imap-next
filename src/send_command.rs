@@ -217,7 +217,7 @@ impl<K: Copy> SendCommandState<K> {
             }
             None => {
                 let Some(entry) = self.send_queue.pop_front() else {
-                    // There is currently no command that need to be sent
+                    // There is currently no command that needs to be sent
                     return Ok(None);
                 };
 
