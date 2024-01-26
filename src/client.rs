@@ -8,18 +8,14 @@ use imap_codec::{
 use imap_types::{
     auth::AuthenticateData,
     command::Command,
-    response::{
-        CommandContinuationRequest, Data, Greeting, Response, Status, StatusBody, StatusKind,
-        Tagged,
-    },
+    response::{CommandContinuationRequest, Data, Greeting, Response, Status},
 };
 use thiserror::Error;
-use tracing::warn;
 
 use crate::{
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveEvent, ReceiveState},
-    send_command::{SendCommandEvent, SendCommandKind, SendCommandState},
+    send_command::{SendCommandEvent, SendCommandState, SendCommandTermination},
     stream::{AnyStream, StreamError},
     types::CommandAuthenticate,
 };
@@ -145,17 +141,17 @@ impl ClientFlow {
 
     async fn progress_send(&mut self) -> Result<Option<ClientFlowEvent>, ClientFlowError> {
         match self.send_command_state.progress(&mut self.stream).await? {
-            Some(SendCommandEvent::CommandSent {
+            Some(SendCommandEvent::Command {
                 key: handle,
                 command,
             }) => Ok(Some(ClientFlowEvent::CommandSent { handle, command })),
-            Some(SendCommandEvent::CommandAuthenticateStarted { key: handle }) => {
+            Some(SendCommandEvent::CommandAuthenticate { key: handle }) => {
                 Ok(Some(ClientFlowEvent::AuthenticateStarted { handle }))
             }
-            Some(SendCommandEvent::IdleStarted { key: handle }) => {
+            Some(SendCommandEvent::CommandIdle { key: handle }) => {
                 Ok(Some(ClientFlowEvent::IdleCommandSent { handle }))
             }
-            Some(SendCommandEvent::IdleTerminated { key: handle }) => {
+            Some(SendCommandEvent::IdleDone { key: handle }) => {
                 Ok(Some(ClientFlowEvent::IdleDoneSent { handle }))
             }
             None => Ok(None),
@@ -192,32 +188,35 @@ impl ClientFlow {
 
             match response {
                 Response::Status(status) => {
-                    let event = if let Some(finish_result) = self.maybe_finish_command(&status) {
+                    let event = if let Some(finish_result) =
+                        self.send_command_state.maybe_remove(&status)
+                    {
                         match finish_result {
-                            FinishCommandResult::LiteralRejected { handle, command } => {
-                                ClientFlowEvent::CommandRejected {
-                                    handle,
-                                    command,
-                                    status,
-                                }
-                            }
-                            FinishCommandResult::AuthenticationAccepted {
+                            SendCommandTermination::LiteralRejected {
+                                key: handle,
+                                command,
+                            } => ClientFlowEvent::CommandRejected {
                                 handle,
+                                command,
+                                status,
+                            },
+                            SendCommandTermination::AuthenticateAccepted {
+                                key: handle,
                                 command_authenticate,
                             } => ClientFlowEvent::AuthenticateAccepted {
                                 handle,
                                 command_authenticate,
                                 status,
                             },
-                            FinishCommandResult::AuthenticationRejected {
-                                handle,
+                            SendCommandTermination::AuthenticateRejected {
+                                key: handle,
                                 command_authenticate,
                             } => ClientFlowEvent::AuthenticateRejected {
                                 handle,
                                 command_authenticate,
                                 status,
                             },
-                            FinishCommandResult::IdleRejected { handle } => {
+                            SendCommandTermination::IdleRejected { key: handle } => {
                                 ClientFlowEvent::IdleRejected { handle, status }
                             }
                         }
@@ -229,16 +228,16 @@ impl ClientFlow {
                 }
                 Response::Data(data) => break Some(ClientFlowEvent::DataReceived { data }),
                 Response::CommandContinuationRequest(continuation) => {
-                    if self.send_command_state.continue_literal() {
+                    if self.send_command_state.literal_continue() {
                         // We received a continuation that was necessary for sending a command.
                         // So we abort receiving responses for now and continue with sending commands.
                         break None;
-                    } else if let Some(&handle) = self.send_command_state.continue_authenticate() {
+                    } else if let Some(handle) = self.send_command_state.authenticate_continue() {
                         break Some(ClientFlowEvent::ContinuationAuthenticateReceived {
                             handle,
                             continuation,
                         });
-                    } else if let Some(&handle) = self.send_command_state.continue_idle() {
+                    } else if let Some(handle) = self.send_command_state.idle_continue() {
                         break Some(ClientFlowEvent::IdleAccepted {
                             handle,
                             continuation,
@@ -253,109 +252,16 @@ impl ClientFlow {
         Ok(event)
     }
 
-    fn maybe_finish_command(&mut self, status: &Status) -> Option<FinishCommandResult> {
-        let command_kind = self.send_command_state.command_in_progress()?;
-
-        match command_kind {
-            SendCommandKind::Regular { command } => {
-                let removed_command = match status {
-                    Status::Tagged(Tagged {
-                        tag,
-                        body: StatusBody { kind, .. },
-                        ..
-                    }) if *kind == StatusKind::Bad && tag == &command.tag => {
-                        self.send_command_state.remove_command_in_progress()
-                    }
-                    _ => None,
-                };
-
-                if let Some((handle, SendCommandKind::Regular { command })) = removed_command {
-                    Some(FinishCommandResult::LiteralRejected { handle, command })
-                } else {
-                    None
-                }
-            }
-            SendCommandKind::Authenticate {
-                command_authenticate,
-                ..
-            } => {
-                let removed_command = match status {
-                    Status::Tagged(Tagged {
-                        tag,
-                        body: StatusBody { kind, .. },
-                        ..
-                    }) if tag == &command_authenticate.tag => self
-                        .send_command_state
-                        .remove_command_in_progress()
-                        .zip(Some(*kind)),
-                    _ => None,
-                };
-
-                if let Some((
-                    (
-                        handle,
-                        SendCommandKind::Authenticate {
-                            command_authenticate,
-                            ..
-                        },
-                    ),
-                    status_kind,
-                )) = removed_command
-                {
-                    match status_kind {
-                        StatusKind::Ok => Some(FinishCommandResult::AuthenticationAccepted {
-                            handle,
-                            command_authenticate,
-                        }),
-                        StatusKind::No | StatusKind::Bad => {
-                            Some(FinishCommandResult::AuthenticationRejected {
-                                handle,
-                                command_authenticate,
-                            })
-                        }
-                    }
-                } else {
-                    None
-                }
-            }
-            SendCommandKind::Idle { tag: idle_tag, .. } => {
-                let removed_command = match status {
-                    Status::Tagged(Tagged {
-                        tag,
-                        body: StatusBody { kind, .. },
-                        ..
-                    }) if tag == idle_tag => {
-                        if matches!(kind, StatusKind::Ok | StatusKind::Bad) {
-                            warn!(got=?status, "Expected command continuation request response or NO command completion result");
-                            warn!("Interpreting as IDLE rejected");
-                        }
-
-                        // TODO: Don't match status if idle already accepted
-                        self.send_command_state.remove_command_in_progress()
-                    }
-                    _ => None,
-                };
-
-                if let Some((handle, SendCommandKind::Idle { .. })) = removed_command {
-                    Some(FinishCommandResult::IdleRejected { handle })
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
-    pub fn authenticate_continue(
+    pub fn set_authenticate_data(
         &mut self,
         authenticate_data: AuthenticateData,
     ) -> Result<ClientFlowCommandHandle, AuthenticateData> {
         self.send_command_state
-            .continue_authenticate_with_data(authenticate_data)
-            .copied()
+            .set_authenticate_data(authenticate_data)
     }
 
-    pub fn idle_done(&mut self) -> Option<ClientFlowCommandHandle> {
-        self.send_command_state.idle_done().copied()
+    pub fn set_idle_done(&mut self) -> Option<ClientFlowCommandHandle> {
+        self.send_command_state.set_idle_done()
     }
 
     #[cfg(feature = "expose_stream")]
@@ -366,24 +272,6 @@ impl ClientFlow {
     pub fn stream_mut(&mut self) -> &mut AnyStream {
         &mut self.stream
     }
-}
-
-enum FinishCommandResult {
-    LiteralRejected {
-        handle: ClientFlowCommandHandle,
-        command: Command<'static>,
-    },
-    AuthenticationAccepted {
-        handle: ClientFlowCommandHandle,
-        command_authenticate: CommandAuthenticate,
-    },
-    AuthenticationRejected {
-        handle: ClientFlowCommandHandle,
-        command_authenticate: CommandAuthenticate,
-    },
-    IdleRejected {
-        handle: ClientFlowCommandHandle,
-    },
 }
 
 /// A handle for an enqueued [`Command`].
