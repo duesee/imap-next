@@ -59,7 +59,7 @@ async fn main() {
                 }
             }
             _ = lines.progress() => {
-                if client.idle_done().is_some() {
+                if client.set_idle_done().is_some() {
                     println!("Triggered IDLE DONE");
                 } else {
                     println!("Can't trigger IDLE DONE now");

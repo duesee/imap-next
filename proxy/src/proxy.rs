@@ -298,7 +298,7 @@ fn handle_client_event(
             trace!(authenticate_data=%format!("{:?}", authenticate_data).red(), role = "c2p", "|--> Received authenticate_data");
             // TODO: unwrap
             let _handle = proxy_to_server
-                .authenticate_continue(authenticate_data)
+                .set_authenticate_data(authenticate_data)
                 .unwrap();
             // TODO: log handle
         }
@@ -314,7 +314,7 @@ fn handle_client_event(
         }
         ServerFlowEvent::IdleDoneReceived => {
             trace!(role = "c2p", "|--> Received done (idle)");
-            let _handle = proxy_to_server.idle_done();
+            let _handle = proxy_to_server.set_idle_done();
             // TODO: log handle
         }
     }
