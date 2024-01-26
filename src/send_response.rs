@@ -34,13 +34,8 @@ where
     }
 
     pub fn enqueue(&mut self, key: K, response: C::Message<'static>) {
-        let fragments = self.codec.encode(&response).collect();
-        let entry = QueuedResponse {
-            key,
-            response,
-            fragments,
-        };
-        self.queued_responses.push_back(entry);
+        self.queued_responses
+            .push_back(QueuedResponse { key, response });
     }
 
     pub fn finish(mut self) -> BytesMut {
@@ -66,7 +61,7 @@ where
                     return Ok(None);
                 };
 
-                queued_response.push_to_buffer(&mut self.write_buffer)
+                queued_response.push_to_buffer(&mut self.write_buffer, &self.codec)
             }
         };
 
@@ -95,15 +90,14 @@ where
 {
     key: K,
     response: C::Message<'static>,
-    fragments: Vec<Fragment>,
 }
 
 impl<C: Encoder, K> QueuedResponse<C, K>
 where
     C::Message<'static>: Debug,
 {
-    fn push_to_buffer(self, write_buffer: &mut BytesMut) -> CurrentResponse<C, K> {
-        for fragment in self.fragments {
+    fn push_to_buffer(self, write_buffer: &mut BytesMut, codec: &C) -> CurrentResponse<C, K> {
+        for fragment in codec.encode(&self.response) {
             let data = match fragment {
                 Fragment::Line { data } => data,
                 // Note: The server doesn't need to wait before sending a literal.
