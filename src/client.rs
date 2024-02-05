@@ -43,7 +43,7 @@ pub struct ClientFlow {
     stream: AnyStream,
 
     handle_generator: HandleGenerator<ClientFlowCommandHandle>,
-    send_command_state: SendCommandState<ClientFlowCommandHandle>,
+    send_command_state: SendCommandState,
     receive_response_state: ReceiveState<ResponseCodec>,
 }
 
@@ -141,17 +141,16 @@ impl ClientFlow {
 
     async fn progress_send(&mut self) -> Result<Option<ClientFlowEvent>, ClientFlowError> {
         match self.send_command_state.progress(&mut self.stream).await? {
-            Some(SendCommandEvent::Command {
-                key: handle,
-                command,
-            }) => Ok(Some(ClientFlowEvent::CommandSent { handle, command })),
-            Some(SendCommandEvent::CommandAuthenticate { key: handle }) => {
+            Some(SendCommandEvent::Command { handle, command }) => {
+                Ok(Some(ClientFlowEvent::CommandSent { handle, command }))
+            }
+            Some(SendCommandEvent::CommandAuthenticate { handle }) => {
                 Ok(Some(ClientFlowEvent::AuthenticateStarted { handle }))
             }
-            Some(SendCommandEvent::CommandIdle { key: handle }) => {
+            Some(SendCommandEvent::CommandIdle { handle }) => {
                 Ok(Some(ClientFlowEvent::IdleCommandSent { handle }))
             }
-            Some(SendCommandEvent::IdleDone { key: handle }) => {
+            Some(SendCommandEvent::IdleDone { handle }) => {
                 Ok(Some(ClientFlowEvent::IdleDoneSent { handle }))
             }
             None => Ok(None),
@@ -192,16 +191,15 @@ impl ClientFlow {
                         self.send_command_state.maybe_remove(&status)
                     {
                         match finish_result {
-                            SendCommandTermination::LiteralRejected {
-                                key: handle,
-                                command,
-                            } => ClientFlowEvent::CommandRejected {
-                                handle,
-                                command,
-                                status,
-                            },
+                            SendCommandTermination::LiteralRejected { handle, command } => {
+                                ClientFlowEvent::CommandRejected {
+                                    handle,
+                                    command,
+                                    status,
+                                }
+                            }
                             SendCommandTermination::AuthenticateAccepted {
-                                key: handle,
+                                handle,
                                 command_authenticate,
                             } => ClientFlowEvent::AuthenticateAccepted {
                                 handle,
@@ -209,14 +207,14 @@ impl ClientFlow {
                                 status,
                             },
                             SendCommandTermination::AuthenticateRejected {
-                                key: handle,
+                                handle,
                                 command_authenticate,
                             } => ClientFlowEvent::AuthenticateRejected {
                                 handle,
                                 command_authenticate,
                                 status,
                             },
-                            SendCommandTermination::IdleRejected { key: handle } => {
+                            SendCommandTermination::IdleRejected { handle } => {
                                 ClientFlowEvent::IdleRejected { handle, status }
                             }
                         }
