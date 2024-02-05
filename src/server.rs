@@ -55,7 +55,7 @@ pub struct ServerFlow {
     options: ServerFlowOptions,
 
     handle_generator: HandleGenerator<ServerFlowResponseHandle>,
-    send_response_state: SendResponseState<ResponseCodec, Option<ServerFlowResponseHandle>>,
+    send_response_state: SendResponseState<ResponseCodec>,
     receive_command_state: ServerReceiveState,
 }
 
@@ -69,11 +69,12 @@ impl ServerFlow {
         let write_buffer = BytesMut::new();
         let mut send_greeting_state =
             SendResponseState::new(GreetingCodec::default(), write_buffer);
-        send_greeting_state.enqueue((), greeting);
+        send_greeting_state.enqueue(None, greeting);
         let greeting = loop {
-            if let Some(SendResponseEvent { response, .. }) =
+            if let Some(SendResponseEvent { response, handle }) =
                 send_greeting_state.progress(&mut stream).await?
             {
+                assert_eq!(handle, None);
                 break response;
             }
         };
@@ -170,13 +171,13 @@ impl ServerFlow {
     async fn progress_send(&mut self) -> Result<Option<ServerFlowEvent>, ServerFlowError> {
         match self.send_response_state.progress(&mut self.stream).await? {
             Some(SendResponseEvent {
-                key: Some(handle),
+                handle: Some(handle),
                 response,
             }) => {
                 // A response was sucessfully sent, inform the caller
                 Ok(Some(ServerFlowEvent::ResponseSent { handle, response }))
             }
-            Some(SendResponseEvent { key: None, .. }) => {
+            Some(SendResponseEvent { handle: None, .. }) => {
                 // An internally created response was sent, don't inform the caller
                 Ok(None)
             }

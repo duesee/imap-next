@@ -3,24 +3,27 @@ use std::{collections::VecDeque, fmt::Debug};
 use bytes::BytesMut;
 use imap_codec::encode::{Encoder, Fragment};
 
-use crate::stream::{AnyStream, StreamError};
+use crate::{
+    server::ServerFlowResponseHandle,
+    stream::{AnyStream, StreamError},
+};
 
 #[derive(Debug)]
-pub struct SendResponseState<C: Encoder, K>
+pub struct SendResponseState<C: Encoder>
 where
     C::Message<'static>: Debug,
 {
     codec: C,
     // FIFO queue for responses that should be sent next.
-    queued_responses: VecDeque<QueuedResponse<C, K>>,
+    queued_responses: VecDeque<QueuedResponse<C>>,
     // The response that is currently being sent.
-    current_response: Option<CurrentResponse<C, K>>,
+    current_response: Option<CurrentResponse<C>>,
     // Used for writing the current response to the stream.
     // Should be empty if `current_response` is `None`.
     write_buffer: BytesMut,
 }
 
-impl<C: Encoder, K> SendResponseState<C, K>
+impl<C: Encoder> SendResponseState<C>
 where
     C::Message<'static>: Debug,
 {
@@ -33,9 +36,13 @@ where
         }
     }
 
-    pub fn enqueue(&mut self, key: K, response: C::Message<'static>) {
+    pub fn enqueue(
+        &mut self,
+        handle: Option<ServerFlowResponseHandle>,
+        response: C::Message<'static>,
+    ) {
         self.queued_responses
-            .push_back(QueuedResponse { key, response });
+            .push_back(QueuedResponse { handle, response });
     }
 
     pub fn finish(mut self) -> BytesMut {
@@ -46,7 +53,7 @@ where
     pub async fn progress(
         &mut self,
         stream: &mut AnyStream,
-    ) -> Result<Option<SendResponseEvent<C, K>>, StreamError> {
+    ) -> Result<Option<SendResponseEvent<C>>, StreamError> {
         let current_response = match self.current_response.take() {
             Some(current_response) => {
                 // We are currently sending a response but the sending process was cancelled.
@@ -76,7 +83,7 @@ where
 
         // We finished sending a response completely
         Ok(Some(SendResponseEvent {
-            key: current_response.key,
+            handle: current_response.handle,
             response: current_response.response,
         }))
     }
@@ -84,19 +91,19 @@ where
 
 // A response that is queued but not sent yet.
 #[derive(Debug)]
-struct QueuedResponse<C: Encoder, K>
+struct QueuedResponse<C: Encoder>
 where
     C::Message<'static>: Debug,
 {
-    key: K,
+    handle: Option<ServerFlowResponseHandle>,
     response: C::Message<'static>,
 }
 
-impl<C: Encoder, K> QueuedResponse<C, K>
+impl<C: Encoder> QueuedResponse<C>
 where
     C::Message<'static>: Debug,
 {
-    fn push_to_buffer(self, write_buffer: &mut BytesMut, codec: &C) -> CurrentResponse<C, K> {
+    fn push_to_buffer(self, write_buffer: &mut BytesMut, codec: &C) -> CurrentResponse<C> {
         for fragment in codec.encode(&self.response) {
             let data = match fragment {
                 Fragment::Line { data } => data,
@@ -110,7 +117,7 @@ where
         }
 
         CurrentResponse {
-            key: self.key,
+            handle: self.handle,
             response: self.response,
         }
     }
@@ -118,16 +125,16 @@ where
 
 // A response that is currently being sent.
 #[derive(Debug)]
-struct CurrentResponse<C: Encoder, K>
+struct CurrentResponse<C: Encoder>
 where
     C::Message<'static>: Debug,
 {
-    key: K,
+    handle: Option<ServerFlowResponseHandle>,
     response: C::Message<'static>,
 }
 
 // A response was sent.
-pub struct SendResponseEvent<C: Encoder, K> {
-    pub key: K,
+pub struct SendResponseEvent<C: Encoder> {
+    pub handle: Option<ServerFlowResponseHandle>,
     pub response: C::Message<'static>,
 }
