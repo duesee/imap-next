@@ -356,6 +356,15 @@ impl ClientFlow {
     pub fn idle_done(&mut self) -> Option<ClientFlowCommandHandle> {
         self.send_command_state.idle_done().copied()
     }
+
+    #[cfg(feature = "expose_stream")]
+    /// Return the underlying stream for debug purposes (or experiments).
+    ///
+    /// Note: Writing to or reading from the stream may introduce
+    /// conflicts with imap-flow.
+    pub fn stream_mut(&mut self) -> &mut AnyStream {
+        &mut self.stream
+    }
 }
 
 enum FinishCommandResult {

@@ -412,6 +412,15 @@ impl ServerFlow {
             Err(status)
         }
     }
+
+    #[cfg(feature = "expose_stream")]
+    /// Return the underlying stream for debug purposes (or experiments).
+    ///
+    /// Note: Writing to or reading from the stream may introduce
+    /// conflicts with imap-flow.
+    pub fn stream_mut(&mut self) -> &mut AnyStream {
+        &mut self.stream
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
