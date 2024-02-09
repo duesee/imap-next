@@ -194,7 +194,7 @@ impl Proxy<ConnectedState> {
     pub async fn start_conversation(self) {
         let (mut proxy_to_server, mut greeting) = {
             // TODO: Read options from config
-            let options = ClientFlowOptions { crlf_relaxed: true };
+            let options = ClientFlowOptions::default();
 
             let result = ClientFlow::receive_greeting(self.state.proxy_to_server, options).await;
 
@@ -212,11 +212,9 @@ impl Proxy<ConnectedState> {
 
         let (mut client_to_proxy, greeting) = {
             // TODO: Read options from config
-            let options = ServerFlowOptions {
-                literal_accept_text: Text::try_from(LITERAL_ACCEPT_TEXT).unwrap(),
-                literal_reject_text: Text::try_from(LITERAL_REJECT_TEXT).unwrap(),
-                ..Default::default()
-            };
+            let mut options = ServerFlowOptions::default();
+            options.literal_accept_text = Text::try_from(LITERAL_ACCEPT_TEXT).unwrap();
+            options.literal_reject_text = Text::try_from(LITERAL_REJECT_TEXT).unwrap();
 
             let result =
                 ServerFlow::send_greeting(self.state.client_to_proxy, options, greeting).await;
