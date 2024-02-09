@@ -26,6 +26,7 @@ static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ServerFlowResponseHa
     HandleGeneratorGenerator::new();
 
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ServerFlowOptions {
     pub crlf_relaxed: bool,
     pub max_literal_size: u32,

@@ -27,7 +27,8 @@ use crate::{
 static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ClientFlowCommandHandle> =
     HandleGeneratorGenerator::new();
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ClientFlowOptions {
     pub crlf_relaxed: bool,
 }
