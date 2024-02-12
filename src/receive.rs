@@ -136,7 +136,7 @@ pub enum ReceiveEvent<C: Decoder> {
     ExpectedCrlfGotLf,
 }
 
-// The next fragment that will be read...
+/// The next fragment that will be read...
 #[derive(Clone, Copy, Debug, Default)]
 enum NextFragment {
     // ... is a line.
@@ -150,7 +150,7 @@ enum NextFragment {
     },
 }
 
-// A line ending for the current line was found.
+/// A line ending for the current line was found.
 struct FindCrlfResult {
     // The position of the `\n` symbol
     lf_position: usize,
