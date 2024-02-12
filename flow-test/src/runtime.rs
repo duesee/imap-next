@@ -1,6 +1,6 @@
 use std::{future::Future, time::Duration};
 
-use tokio::{join, runtime, time::sleep};
+use tokio::{join, runtime, select, time::sleep};
 
 /// Options for creating an instance of `Runtime`.
 #[derive(Clone, Debug, PartialEq)]
@@ -59,5 +59,18 @@ impl Runtime {
         future2: impl Future<Output = T2>,
     ) -> (T1, T2) {
         self.run(async { join!(future1, future2) })
+    }
+
+    pub fn run2_and_select<T>(
+        &self,
+        future1: impl Future<Output = T>,
+        future2: impl Future<Output = T>,
+    ) -> T {
+        self.run(async {
+            select! {
+                output = future1 => output,
+                output = future2 => output,
+            }
+        })
     }
 }
