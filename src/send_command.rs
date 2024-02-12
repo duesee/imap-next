@@ -331,7 +331,7 @@ impl SendCommandState {
                 state: current_command,
                 event,
             } => {
-                // Command is not finshed yet
+                // Command is not finished yet
                 self.current_command = Some(current_command);
                 Ok(event)
             }
@@ -343,7 +343,7 @@ impl SendCommandState {
     }
 }
 
-/// A command that is queued but not sent yet.
+/// Queued (and not sent yet) command.
 #[derive(Debug)]
 struct QueuedCommand {
     handle: ClientFlowCommandHandle,
@@ -404,14 +404,14 @@ impl QueuedCommand {
     }
 }
 
-/// A command that is currently being sent.
+/// Currently being sent command.
 #[derive(Debug)]
 enum CurrentCommand {
-    /// The sending state of a regular command.
+    /// Sending state of regular command.
     Command(CommandState),
-    /// The sending state of a authenticate command.
+    /// Sending state of authenticate command.
     Authenticate(AuthenticateState),
-    /// The sending state of a idle command.
+    /// Sending state of idle command.
     Idle(IdleState),
 }
 
@@ -435,18 +435,18 @@ impl CurrentCommand {
     }
 }
 
-/// The updated command state after sending all bytes, see `finish_sending`.
+/// Updated command state after sending all bytes, see `finish_sending`.
 enum FinishSendingResult<S> {
-    // The command is not finished yet.
+    /// Command not finished yet.
     Uncompleted {
-        // The updated command state.
+        /// Updated command state.
         state: S,
-        // An event that needs to be returned by `progress`.
+        /// Event that needs to be returned by `progress`.
         event: Option<SendCommandEvent>,
     },
-    // The command was sent completely.
+    /// Command sent completely.
     Completed {
-        // An event that needs to be returned by `progress`.
+        /// Event that needs to be returned by `progress`.
         event: SendCommandEvent,
     },
 }
@@ -559,7 +559,7 @@ enum CommandActivity {
     /// Waiting until the server accepts the literal via continuation request or rejects it
     /// via status.
     WaitingForLiteralAccepted {
-        /// The literal that needs to be accepted by the server.
+        /// Literal that needs to be accepted by the server.
         limbo_literal: Vec<u8>,
     },
 }
@@ -702,7 +702,7 @@ enum IdleActivity {
     WaitingForIdleDoneSent,
 }
 
-// A command was sent.
+/// Command was sent.
 #[derive(Debug)]
 pub enum SendCommandEvent {
     Command {
@@ -720,25 +720,23 @@ pub enum SendCommandEvent {
     },
 }
 
-// A command was terminated via `maybe_terminate`.
+/// Command was terminated via `maybe_terminate`.
 pub enum SendCommandTermination {
-    // A command was terminated because its literal was rejected by the server.
+    /// Command was terminated because its literal was rejected by the server.
     LiteralRejected {
         handle: ClientFlowCommandHandle,
         command: Command<'static>,
     },
-    // An authenticate command was terminated because the server accepted it.
+    /// Authenticate command was accepted.
     AuthenticateAccepted {
         handle: ClientFlowCommandHandle,
         command_authenticate: CommandAuthenticate,
     },
-    // An authenticate command was terminated because the server rejected it.
+    /// Authenticate command was rejected.
     AuthenticateRejected {
         handle: ClientFlowCommandHandle,
         command_authenticate: CommandAuthenticate,
     },
-    // Ad idle command was terminated because the server rejected it.
-    IdleRejected {
-        handle: ClientFlowCommandHandle,
-    },
+    /// Idle command was rejected.
+    IdleRejected { handle: ClientFlowCommandHandle },
 }

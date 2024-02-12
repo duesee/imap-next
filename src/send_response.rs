@@ -89,7 +89,7 @@ where
     }
 }
 
-// A response that is queued but not sent yet.
+/// A response that is queued but not sent yet.
 #[derive(Debug)]
 struct QueuedResponse<C: Encoder>
 where
@@ -123,7 +123,7 @@ where
     }
 }
 
-// A response that is currently being sent.
+/// A response that is currently being sent.
 #[derive(Debug)]
 struct CurrentResponse<C: Encoder>
 where
@@ -133,7 +133,7 @@ where
     response: C::Message<'static>,
 }
 
-// A response was sent.
+/// A response was sent.
 pub struct SendResponseEvent<C: Encoder> {
     pub handle: Option<ServerFlowResponseHandle>,
     pub response: C::Message<'static>,

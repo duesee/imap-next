@@ -17,7 +17,7 @@ pub enum ControlFlow {
     Abort,
 }
 
-// Remove unsupported capabilities in a greetings `Code::Capability`.
+/// Remove unsupported capabilities in a greetings `Code::Capability`.
 pub fn filter_capabilities_in_greeting(greeting: &mut Greeting) {
     if let Some(Code::Capability(capabilities)) = &mut greeting.code {
         let filtered = filter_capabilities(capabilities.clone());
@@ -33,7 +33,7 @@ pub fn filter_capabilities_in_greeting(greeting: &mut Greeting) {
     }
 }
 
-// Remove unsupported capabilities in a `Data::Capability`.
+/// Remove unsupported capabilities in a `Data::Capability`.
 pub fn filter_capabilities_in_data(data: &mut Data) {
     if let Data::Capability(capabilities) = data {
         let filtered = filter_capabilities(capabilities.clone());
@@ -49,7 +49,7 @@ pub fn filter_capabilities_in_data(data: &mut Data) {
     }
 }
 
-// Remove unsupported capabilities in a status' `Code::Capability`.
+/// Remove unsupported capabilities in a status' `Code::Capability`.
 pub fn filter_capabilities_in_status(status: &mut Status) {
     if let Status::Tagged(Tagged {
         body:
@@ -81,7 +81,7 @@ pub fn filter_capabilities_in_status(status: &mut Status) {
     }
 }
 
-// Remove unsupported capabilities in command continuation request response.
+/// Remove unsupported capabilities in command continuation request response.
 pub fn filter_capabilities_in_continuation(continuation: &mut CommandContinuationRequest) {
     if let CommandContinuationRequest::Basic(basic) = continuation {
         if let Some(Code::Capability(capabilities)) = basic.code() {
