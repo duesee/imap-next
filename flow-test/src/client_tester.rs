@@ -2,10 +2,12 @@ use std::net::SocketAddr;
 
 use bstr::ByteSlice;
 use imap_flow::{
-    client::{ClientFlow, ClientFlowError, ClientFlowEvent, ClientFlowOptions},
+    client::{
+        ClientFlow, ClientFlowCommandHandle, ClientFlowError, ClientFlowEvent, ClientFlowOptions,
+    },
     stream::AnyStream,
 };
-use imap_types::bounded_static::ToBoundedStatic;
+use imap_types::{bounded_static::ToBoundedStatic, command::Command};
 use tokio::net::TcpStream;
 use tracing::trace;
 
@@ -54,20 +56,60 @@ impl ClientTester {
         }
     }
 
-    pub async fn send_command(&mut self, bytes: &[u8]) {
-        let enqueued_command = self.codecs.decode_command_normalized(bytes);
+    pub fn enqueue_command(&mut self, bytes: &[u8]) -> EnqueuedCommand {
+        let command = self.codecs.decode_command_normalized(bytes).to_static();
         let client = self.connection_state.greeted();
-        let enqueued_handle = client.enqueue_command(enqueued_command.to_static());
+        let handle = client.enqueue_command(command.to_static());
+        EnqueuedCommand { command, handle }
+    }
+
+    pub async fn progress_command(&mut self, enqueued_command: EnqueuedCommand) {
+        let client = self.connection_state.greeted();
         let event = client.progress().await.unwrap();
         match event {
             ClientFlowEvent::CommandSent { handle, command } => {
-                assert_eq!(enqueued_handle, handle);
-                assert_eq!(enqueued_command, command);
+                assert_eq!(enqueued_command.handle, handle);
+                assert_eq!(enqueued_command.command, command);
             }
             event => {
                 panic!("Client emitted unexpected event: {event:?}");
             }
         }
+    }
+
+    pub async fn progress_rejected_command(
+        &mut self,
+        enqueued_command: EnqueuedCommand,
+        status_bytes: &[u8],
+    ) {
+        let expected_status = self.codecs.decode_status(status_bytes);
+        let client = self.connection_state.greeted();
+        let event = client.progress().await.unwrap();
+        match event {
+            ClientFlowEvent::CommandRejected {
+                handle,
+                command,
+                status,
+            } => {
+                assert_eq!(enqueued_command.handle, handle);
+                assert_eq!(enqueued_command.command, command);
+                assert_eq!(expected_status, status);
+            }
+            event => {
+                panic!("Client emitted unexpected event: {event:?}");
+            }
+        }
+    }
+
+    pub async fn send_command(&mut self, bytes: &[u8]) {
+        let enqueued_command = self.enqueue_command(bytes);
+        self.progress_command(enqueued_command).await;
+    }
+
+    pub async fn send_rejected_command(&mut self, command_bytes: &[u8], status_bytes: &[u8]) {
+        let enqueued_command = self.enqueue_command(command_bytes);
+        self.progress_rejected_command(enqueued_command, status_bytes)
+            .await;
     }
 
     pub async fn receive_data(&mut self, expected_bytes: &[u8]) {
@@ -152,4 +194,10 @@ impl ConnectionState {
     fn take(&mut self) -> ConnectionState {
         std::mem::replace(self, ConnectionState::Disconnected)
     }
+}
+
+/// A command that was enqueued and can later be used for assertions.
+pub struct EnqueuedCommand {
+    handle: ClientFlowCommandHandle,
+    command: Command<'static>,
 }

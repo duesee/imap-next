@@ -112,6 +112,26 @@ impl ServerTester {
             }
         }
     }
+
+    pub async fn receive_error_because_literal_too_long(&mut self, expected_bytes: &[u8]) {
+        let server = self.connection_state.greeted();
+        let error = server.progress().await.unwrap_err();
+        match error {
+            ServerFlowError::LiteralTooLong { discarded_bytes } => {
+                assert_eq!(expected_bytes.as_bstr(), discarded_bytes.as_bstr());
+            }
+            error => {
+                panic!("Server has unexpected error: {error:?}");
+            }
+        }
+    }
+
+    /// Progresses internal responses without expecting any results.
+    pub async fn progress_internal_responses<T>(&mut self) -> T {
+        let server = self.connection_state.greeted();
+        let result = server.progress().await;
+        panic!("Server has unexpected result: {result:?}");
+    }
 }
 
 /// The current state of the connection between server and client.
