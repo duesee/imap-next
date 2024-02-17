@@ -238,7 +238,7 @@ impl ServerFlow {
                                     // Inform the client that the literal was rejected.
 
                                     // Unwrap: This should never fail because the text is not Base64.
-                                    let status = Status::no(
+                                    let status = Status::bad(
                                         Some(tag),
                                         None,
                                         self.options.literal_reject_text.clone(),
