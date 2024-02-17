@@ -252,7 +252,7 @@ impl ClientFlow {
 
     pub fn set_authenticate_data(
         &mut self,
-        authenticate_data: AuthenticateData,
+        authenticate_data: AuthenticateData<'static>,
     ) -> Result<ClientFlowCommandHandle, AuthenticateData> {
         self.send_command_state
             .set_authenticate_data(authenticate_data)

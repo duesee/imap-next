@@ -114,7 +114,7 @@ impl Task for AuthenticatePlainTask {
         if self.ir {
             Ok(AuthenticateData::Cancel)
         } else if let Some(line) = self.line.take() {
-            Ok(AuthenticateData::Continue(Secret::new(line)))
+            Ok(AuthenticateData::r#continue(line))
         } else {
             Ok(AuthenticateData::Cancel)
         }
