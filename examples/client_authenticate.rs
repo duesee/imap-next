@@ -7,7 +7,6 @@ use imap_flow::{
 use imap_types::{
     auth::{AuthMechanism, AuthenticateData},
     command::{Command, CommandBody},
-    secret::Secret,
 };
 use tag_generator::TagGenerator;
 use tokio::net::TcpStream;
@@ -30,8 +29,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     let mut authenticate_data = VecDeque::from([
-        AuthenticateData::Continue(Secret::new(b"alice".to_vec())),
-        AuthenticateData::Continue(Secret::new(b"password".to_vec())),
+        AuthenticateData::r#continue(b"alice".to_vec()),
+        AuthenticateData::r#continue(b"password".to_vec()),
     ]);
 
     loop {

@@ -551,7 +551,7 @@ pub enum ServerFlowEvent {
     /// Make sure to honor the client's request to not end up in an infinite loop. It's up to the
     /// server to end the authentication flow.
     AuthenticateDataReceived {
-        authenticate_data: AuthenticateData,
+        authenticate_data: AuthenticateData<'static>,
     },
     IdleCommandReceived {
         tag: Tag<'static>,
