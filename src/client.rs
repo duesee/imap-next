@@ -32,8 +32,8 @@ pub struct ClientFlowOptions {
 impl Default for ClientFlowOptions {
     fn default() -> Self {
         Self {
-            // Lean towards usability
-            crlf_relaxed: true,
+            // Lean towards conformity
+            crlf_relaxed: false,
         }
     }
 }
