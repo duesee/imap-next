@@ -23,7 +23,7 @@ impl<C> ReceiveState<C> {
         Self {
             codec,
             crlf_relaxed,
-            next_fragment: NextFragment::default(),
+            next_fragment: NextFragment::start_new_line(),
             seen_bytes: 0,
             read_buffer,
         }
@@ -37,7 +37,7 @@ impl<C> ReceiveState<C> {
     pub fn finish_message(&mut self) {
         self.read_buffer.advance(self.seen_bytes);
         self.seen_bytes = 0;
-        self.next_fragment = NextFragment::default();
+        self.next_fragment = NextFragment::start_new_line();
     }
 
     pub fn discard_message(&mut self) -> Box<[u8]> {
@@ -54,8 +54,8 @@ impl<C> ReceiveState<C> {
     {
         loop {
             match self.next_fragment {
-                NextFragment::Line => {
-                    if let Some(event) = self.progress_line(stream).await? {
+                NextFragment::Line { seen_bytes_in_line } => {
+                    if let Some(event) = self.progress_line(stream, seen_bytes_in_line).await? {
                         return Ok(event);
                     }
                 }
@@ -69,26 +69,33 @@ impl<C> ReceiveState<C> {
     async fn progress_line(
         &mut self,
         stream: &mut AnyStream,
+        seen_bytes_in_line: usize,
     ) -> Result<Option<ReceiveEvent<C>>, StreamError>
     where
         C: Decoder,
         for<'a> C::Message<'a>: IntoBoundedStatic<Static = C::Message<'static>>,
         for<'a> C::Error<'a>: IntoBoundedStatic<Static = C::Error<'static>>,
     {
-        // TODO(#128): If the line is really long and we need multiple attempts to receive it,
-        //             then this is O(n^2). This could be fixed by setting seen bytes in the None
-        //             case.
-        let crlf_result = match find_crlf(&self.read_buffer[self.seen_bytes..], self.crlf_relaxed) {
-            Some(crlf_result) => crlf_result,
-            None => {
-                // No full line received yet, more data needed.
-                stream.read(&mut self.read_buffer).await?;
-                return Ok(None);
-            }
+        let Some(crlf_result) = find_crlf(
+            &self.read_buffer[self.seen_bytes..],
+            seen_bytes_in_line,
+            self.crlf_relaxed,
+        ) else {
+            // No full line received yet, more data needed.
+
+            // Mark the bytes of the partial line as seen.
+            let seen_bytes_in_line = self.read_buffer.len() - self.seen_bytes;
+            self.next_fragment = NextFragment::Line { seen_bytes_in_line };
+
+            // Read more data.
+            stream.read(&mut self.read_buffer).await?;
+
+            return Ok(None);
         };
 
         // Mark the all bytes of the current line as seen.
         self.seen_bytes += crlf_result.lf_position + 1;
+        self.next_fragment = NextFragment::start_new_line();
 
         if crlf_result.expected_crlf_got_lf {
             return Ok(Some(ReceiveEvent::ExpectedCrlfGotLf));
@@ -120,7 +127,7 @@ impl<C> ReceiveState<C> {
         } else {
             // We received enough bytes for the literal.
             // Now we can continue reading the next line.
-            self.next_fragment = NextFragment::Line;
+            self.next_fragment = NextFragment::start_new_line();
             self.seen_bytes += literal_length as usize;
         }
 
@@ -139,17 +146,29 @@ pub enum ReceiveEvent<C: Decoder> {
 }
 
 /// The next fragment that will be read...
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 enum NextFragment {
     // ... is a line.
     //
     // Note: A message always starts (and ends) with a line.
-    #[default]
-    Line,
+    Line {
+        // How many bytes in the current line do we already have checked?
+        // This is important if we need multiple attempts to read from the underlying
+        // stream before the line is completely received.
+        seen_bytes_in_line: usize,
+    },
     // ... is a literal with the given length.
     Literal {
         length: u32,
     },
+}
+
+impl NextFragment {
+    fn start_new_line() -> Self {
+        Self::Line {
+            seen_bytes_in_line: 0,
+        }
+    }
 }
 
 /// A line ending for the current line was found.
@@ -160,10 +179,15 @@ struct FindCrlfResult {
     expected_crlf_got_lf: bool,
 }
 
-// Finds the line ending for the current line.
-// Depending on `crlf_relaxed` the accepted line ending is `\n` (true) or `\r\n` (false).
-fn find_crlf(buf: &[u8], crlf_relaxed: bool) -> Option<FindCrlfResult> {
-    let lf_position = buf.iter().position(|item| *item == b'\n')?;
+/// Finds the line ending (`\n` or `\r\n`) for the current line.
+///
+/// Parameters:
+/// - `buf`: The buffer that contains the current line starting at index 0.
+/// - `start`: At this index the search for `\n` will start. Note that the `\r` might be located
+//     before this index.
+/// - `crlf_relaxed`: Whether the accepted line ending is `\n` or `\r\n`.
+fn find_crlf(buf: &[u8], start: usize, crlf_relaxed: bool) -> Option<FindCrlfResult> {
+    let lf_position = start + buf[start..].iter().position(|item| *item == b'\n')?;
     let expected_crlf_got_lf = !crlf_relaxed && buf[lf_position.saturating_sub(1)] != b'\r';
     Some(FindCrlfResult {
         lf_position,
