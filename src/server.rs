@@ -37,8 +37,8 @@ pub struct ServerFlowOptions {
 impl Default for ServerFlowOptions {
     fn default() -> Self {
         Self {
-            // Lean towards usability
-            crlf_relaxed: true,
+            // Lean towards conformity
+            crlf_relaxed: false,
             // 25 MiB is a common maximum email size (Oct. 2023)
             max_literal_size: 25 * 1024 * 1024,
             // Short unmeaning text
