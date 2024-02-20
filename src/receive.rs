@@ -75,8 +75,9 @@ impl<C> ReceiveState<C> {
         for<'a> C::Message<'a>: IntoBoundedStatic<Static = C::Message<'static>>,
         for<'a> C::Error<'a>: IntoBoundedStatic<Static = C::Error<'static>>,
     {
-        // TODO: If the line is really long and we need multiple attempts to receive it, then this is O(n^2).
-        //       This could be fixed by setting seen bytes in the None case
+        // TODO(#128): If the line is really long and we need multiple attempts to receive it,
+        //             then this is O(n^2). This could be fixed by setting seen bytes in the None
+        //             case.
         let crlf_result = match find_crlf(&self.read_buffer[self.seen_bytes..], self.crlf_relaxed) {
             Some(crlf_result) => crlf_result,
             None => {
@@ -94,8 +95,9 @@ impl<C> ReceiveState<C> {
         }
 
         // Try to parse the whole message from the start (including the new line).
-        // TODO: If the message is really long and we need multiple attempts to receive it, then this is O(n^2)
-        //       IMO this can be only fixed by using a generator-like decoder
+        // TODO(#129): If the message is really long and we need multiple attempts to receive it,
+        //             then this is O(n^2). IMO this can be only fixed by using a generator-like
+        //             decoder.
         match self.codec.decode(&self.read_buffer[..self.seen_bytes]) {
             Ok((remaining, message)) => {
                 assert!(remaining.is_empty());
