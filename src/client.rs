@@ -29,6 +29,7 @@ pub struct ClientFlowOptions {
     pub crlf_relaxed: bool,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for ClientFlowOptions {
     fn default() -> Self {
         Self {

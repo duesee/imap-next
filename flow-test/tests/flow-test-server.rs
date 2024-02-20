@@ -58,6 +58,46 @@ fn gibberish_instead_of_command() {
 }
 
 #[test]
+fn command_with_missing_cr() {
+    let (rt, mut server, mut client) = TestSetup::default().setup_server();
+
+    let greeting = b"* OK ...\r\n";
+    rt.run2(server.send_greeting(greeting), client.receive(greeting));
+
+    // Command with missing \r
+    let noop = b"A1 NOOP\n";
+    rt.run2(
+        client.send(noop),
+        server.receive_error_because_expected_crlf_got_lf(noop),
+    );
+}
+
+#[test]
+fn crlf_relaxed() {
+    let mut setup = TestSetup::default();
+    setup.server_flow_options.crlf_relaxed = true;
+
+    let (rt, mut server, mut client) = setup.setup_server();
+
+    let greeting = b"* OK ...\r\n";
+    rt.run2(server.send_greeting(greeting), client.receive(greeting));
+
+    // Command with missing \r
+    let noop = b"A1 NOOP\n";
+    rt.run2(client.send(noop), server.receive_command(noop));
+
+    let status = b"A1 OK ...\r\n";
+    rt.run2(server.send_status(status), client.receive(status));
+
+    // Command with \r still works
+    let noop = b"A2 NOOP\r\n";
+    rt.run2(client.send(noop), server.receive_command(noop));
+
+    let status = b"A2 OK ...\r\n";
+    rt.run2(server.send_status(status), client.receive(status));
+}
+
+#[test]
 fn login_with_literal() {
     // The server will accept the literal ABCDE because it's smaller than the max size
     let max_literal_size_tests = [5, 6, 10, 100];

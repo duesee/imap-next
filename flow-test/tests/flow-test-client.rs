@@ -71,6 +71,62 @@ fn gibberish_instead_of_response() {
 }
 
 #[test]
+fn greeting_with_missing_cr() {
+    let (rt, mut server, mut client) = TestSetup::default().setup_client();
+
+    // Greeting with missing \r
+    let greeting = b"* OK ...\n";
+    rt.run2(
+        server.send(greeting),
+        client.receive_error_because_expected_crlf_got_lf(greeting),
+    );
+}
+
+#[test]
+fn response_with_missing_cr() {
+    let (rt, mut server, mut client) = TestSetup::default().setup_client();
+
+    let greeting = b"* OK ...\r\n";
+    rt.run2(server.send(greeting), client.receive_greeting(greeting));
+
+    let noop = b"A1 NOOP\r\n";
+    rt.run2(client.send_command(noop), server.receive(noop));
+
+    // Response with missing \r
+    let status = b"A1 OK ...\n";
+    rt.run2(
+        server.send(status),
+        client.receive_error_because_expected_crlf_got_lf(status),
+    );
+}
+
+#[test]
+fn crlf_relaxed() {
+    let mut setup = TestSetup::default();
+    setup.client_flow_options.crlf_relaxed = true;
+
+    let (rt, mut server, mut client) = setup.setup_client();
+
+    // Greeting with missing \r
+    let greeting = b"* OK ...\n";
+    rt.run2(server.send(greeting), client.receive_greeting(greeting));
+
+    let noop = b"A1 NOOP\r\n";
+    rt.run2(client.send_command(noop), server.receive(noop));
+
+    // Response with missing \r
+    let status = b"A1 OK ...\n";
+    rt.run2(server.send(status), client.receive_status(status));
+
+    let noop = b"A2 NOOP\r\n";
+    rt.run2(client.send_command(noop), server.receive(noop));
+
+    // Response with \r still works
+    let status = b"A2 OK ...\r\n";
+    rt.run2(server.send(status), client.receive_status(status));
+}
+
+#[test]
 fn login_with_literal() {
     let (rt, mut server, mut client) = TestSetup::default().setup_client();
 

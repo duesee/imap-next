@@ -138,8 +138,8 @@ impl ClientTester {
         }
     }
 
-    pub async fn receive_error_because_malformed_message(&mut self, expected_bytes: &[u8]) {
-        let error = match self.connection_state.take() {
+    async fn receive_error(&mut self) -> ClientFlowError {
+        match self.connection_state.take() {
             ConnectionState::Connected { stream } => {
                 let stream = AnyStream::new(stream);
                 ClientFlow::receive_greeting(stream, self.client_flow_options.clone())
@@ -154,7 +154,23 @@ impl ClientTester {
             ConnectionState::Disconnected => {
                 panic!("Client is already disconnected")
             }
-        };
+        }
+    }
+
+    pub async fn receive_error_because_expected_crlf_got_lf(&mut self, expected_bytes: &[u8]) {
+        let error = self.receive_error().await;
+        match error {
+            ClientFlowError::ExpectedCrlfGotLf { discarded_bytes } => {
+                assert_eq!(expected_bytes.as_bstr(), discarded_bytes.as_bstr());
+            }
+            error => {
+                panic!("Client emitted unexpected error: {error:?}");
+            }
+        }
+    }
+
+    pub async fn receive_error_because_malformed_message(&mut self, expected_bytes: &[u8]) {
+        let error = self.receive_error().await;
         match error {
             ClientFlowError::MalformedMessage { discarded_bytes } => {
                 assert_eq!(expected_bytes.as_bstr(), discarded_bytes.as_bstr());
