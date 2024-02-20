@@ -61,32 +61,37 @@ mod tests {
     fn test_generator_generator() {
         const THREADS: usize = 1000;
         const INVOCATIONS: usize = 5;
-        const TOTAL_INVOCATIONS: usize = THREADS * INVOCATIONS;
-
-        let (sender, receiver) = std::sync::mpsc::channel();
 
         thread::scope(|s| {
-            for _ in 1..=THREADS {
-                let sender = sender.clone();
+            let mut handles = Vec::with_capacity(THREADS);
 
-                s.spawn(move || {
+            for _ in 1..=THREADS {
+                let handle = s.spawn(move || {
+                    let mut tags = Vec::with_capacity(INVOCATIONS);
+
                     let mut generator = TagGenerator::new();
                     thread::sleep(Duration::from_millis(random::<u8>() as u64));
 
                     for _ in 1..=INVOCATIONS {
-                        sender.send(generator.generate()).unwrap();
+                        tags.push(generator.generate());
                     }
+
+                    tags
                 });
+
+                handles.push(handle);
             }
 
             let mut set = BTreeSet::new();
 
-            while set.len() != TOTAL_INVOCATIONS {
-                let tag = receiver.recv().unwrap();
+            for handle in handles {
+                let tags = handle.join().unwrap();
 
-                // Make sure insertion worked, i.e., no duplicate was found.
-                // Note: `Tag` doesn't implement `Ord` so we insert a `String`.
-                assert!(set.insert(tag.as_ref().to_owned()), "duplicate tag found");
+                for tag in tags {
+                    // Make sure insertion worked, i.e., no duplicate was found.
+                    // Note: `Tag` doesn't implement `Ord` so we insert a `String`.
+                    assert!(set.insert(tag.as_ref().to_owned()), "duplicate tag found");
+                }
             }
         });
     }
