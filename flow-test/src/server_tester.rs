@@ -100,6 +100,19 @@ impl ServerTester {
         }
     }
 
+    pub async fn receive_error_because_expected_crlf_got_lf(&mut self, expected_bytes: &[u8]) {
+        let server = self.connection_state.greeted();
+        let error = server.progress().await.unwrap_err();
+        match error {
+            ServerFlowError::ExpectedCrlfGotLf { discarded_bytes } => {
+                assert_eq!(expected_bytes.as_bstr(), discarded_bytes.as_bstr());
+            }
+            error => {
+                panic!("Server has unexpected error: {error:?}");
+            }
+        }
+    }
+
     pub async fn receive_error_because_malformed_message(&mut self, expected_bytes: &[u8]) {
         let server = self.connection_state.greeted();
         let error = server.progress().await.unwrap_err();
