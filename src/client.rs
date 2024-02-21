@@ -226,23 +226,25 @@ impl ClientFlow {
                     break Some(event);
                 }
                 Response::Data(data) => break Some(ClientFlowEvent::DataReceived { data }),
-                Response::CommandContinuationRequest(continuation) => {
+                Response::CommandContinuationRequest(continuation_request) => {
                     if self.send_command_state.literal_continue() {
-                        // We received a continuation that was necessary for sending a command.
+                        // We received a continuation request that was necessary for sending a command.
                         // So we abort receiving responses for now and continue with sending commands.
                         break None;
                     } else if let Some(handle) = self.send_command_state.authenticate_continue() {
-                        break Some(ClientFlowEvent::ContinuationAuthenticateReceived {
+                        break Some(ClientFlowEvent::AuthenticateContinuationRequestReceived {
                             handle,
-                            continuation,
+                            continuation_request,
                         });
                     } else if let Some(handle) = self.send_command_state.idle_continue() {
                         break Some(ClientFlowEvent::IdleAccepted {
                             handle,
-                            continuation,
+                            continuation_request,
                         });
                     } else {
-                        break Some(ClientFlowEvent::ContinuationReceived { continuation });
+                        break Some(ClientFlowEvent::ContinuationRequestReceived {
+                            continuation_request,
+                        });
                     }
                 }
             }
@@ -333,10 +335,10 @@ pub enum ClientFlowEvent {
     /// However, it's up to the server to abort the authentication flow by sending a tagged status
     /// response. In this case, the client will receive either a [`ClientFlowEvent::AuthenticateAccepted`]
     /// or [`ClientFlowEvent::AuthenticateRejected`] event.
-    ContinuationAuthenticateReceived {
+    AuthenticateContinuationRequestReceived {
         /// Handle to the enqueued [`Command`].
         handle: ClientFlowCommandHandle,
-        continuation: CommandContinuationRequest<'static>,
+        continuation_request: CommandContinuationRequest<'static>,
     },
     AuthenticateAccepted {
         handle: ClientFlowCommandHandle,
@@ -353,7 +355,7 @@ pub enum ClientFlowEvent {
     },
     IdleAccepted {
         handle: ClientFlowCommandHandle,
-        continuation: CommandContinuationRequest<'static>,
+        continuation_request: CommandContinuationRequest<'static>,
     },
     IdleRejected {
         handle: ClientFlowCommandHandle,
@@ -372,9 +374,9 @@ pub enum ClientFlowEvent {
     },
     /// Server [`CommandContinuationRequest`] response received.
     ///
-    /// Note: The received continuation was not part of [`ClientFlow`] handling.
-    ContinuationReceived {
-        continuation: CommandContinuationRequest<'static>,
+    /// Note: The received continuation request was not part of [`ClientFlow`] handling.
+    ContinuationRequestReceived {
+        continuation_request: CommandContinuationRequest<'static>,
     },
 }
 

@@ -36,8 +36,8 @@ async fn main() {
                     ClientFlowEvent::IdleCommandSent { .. } => {
                         println!("IDLE command sent")
                     },
-                    ClientFlowEvent::IdleAccepted { continuation, .. } => {
-                        println!("IDLE accepted: {continuation:?}");
+                    ClientFlowEvent::IdleAccepted { continuation_request, .. } => {
+                        println!("IDLE accepted: {continuation_request:?}");
                     },
                     ClientFlowEvent::IdleRejected { status, .. } => {
                         println!("IDLE rejected: {status:?}");

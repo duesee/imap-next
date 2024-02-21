@@ -107,7 +107,7 @@ impl Task for AuthenticatePlainTask {
         }
     }
 
-    fn process_continuation_authenticate(
+    fn process_continuation_request_authenticate(
         &mut self,
         _: CommandContinuationRequest<'static>,
     ) -> Result<AuthenticateData, CommandContinuationRequest<'static>> {

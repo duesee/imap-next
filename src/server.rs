@@ -125,14 +125,14 @@ impl ServerFlow {
     /// The response is not sent immediately but during one of the next calls of
     /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
     /// enqueued.
-    pub fn enqueue_continuation(
+    pub fn enqueue_continuation_request(
         &mut self,
-        continuation: CommandContinuationRequest<'static>,
+        continuation_request: CommandContinuationRequest<'static>,
     ) -> ServerFlowResponseHandle {
         let handle = self.handle_generator.generate();
         self.send_response_state.enqueue(
             Some(handle),
-            Response::CommandContinuationRequest(continuation),
+            Response::CommandContinuationRequest(continuation_request),
         );
         handle
     }
@@ -357,13 +357,13 @@ impl ServerFlow {
 
     pub fn authenticate_continue(
         &mut self,
-        continuation: CommandContinuationRequest<'static>,
+        continuation_request: CommandContinuationRequest<'static>,
     ) -> Result<ServerFlowResponseHandle, CommandContinuationRequest<'static>> {
         if let ServerReceiveState::AuthenticateData { .. } = self.receive_command_state {
-            let handle = self.enqueue_continuation(continuation);
+            let handle = self.enqueue_continuation_request(continuation_request);
             Ok(handle)
         } else {
-            Err(continuation)
+            Err(continuation_request)
         }
     }
 
@@ -388,7 +388,7 @@ impl ServerFlow {
         continuation_request: CommandContinuationRequest<'static>,
     ) -> Result<ServerFlowResponseHandle, CommandContinuationRequest<'static>> {
         if let ServerReceiveState::IdleAccept(_) = &mut self.receive_command_state {
-            let handle = self.enqueue_continuation(continuation_request);
+            let handle = self.enqueue_continuation_request(continuation_request);
 
             self.receive_command_state
                 .change_state(NextExpectedMessage::IdleDone);

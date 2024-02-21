@@ -50,7 +50,7 @@ pub trait Task: 'static {
     }
 
     /// Process command continuation request response.
-    fn process_continuation(
+    fn process_continuation_request(
         &mut self,
         continuation: CommandContinuationRequest<'static>,
     ) -> Option<CommandContinuationRequest<'static>> {
@@ -59,7 +59,7 @@ pub trait Task: 'static {
     }
 
     /// Process command continuation request response (during authenticate).
-    fn process_continuation_authenticate(
+    fn process_continuation_request_authenticate(
         &mut self,
         continuation: CommandContinuationRequest<'static>,
     ) -> Result<AuthenticateData, CommandContinuationRequest<'static>> {
@@ -148,12 +148,13 @@ impl Scheduler {
                     let (handle, tag, task) = self.waiting_tasks.remove_by_handle(handle).unwrap();
                     self.active_tasks.push_back(handle, tag, task);
                 }
-                ClientFlowEvent::ContinuationAuthenticateReceived {
+                ClientFlowEvent::AuthenticateContinuationRequestReceived {
                     handle,
-                    continuation,
+                    continuation_request,
                 } => {
                     let task = self.active_tasks.get_task_by_handle_mut(handle).unwrap();
-                    if let Err(continuation) = task.process_continuation_authenticate(continuation)
+                    if let Err(continuation) =
+                        task.process_continuation_request_authenticate(continuation_request)
                     {
                         return Ok(SchedulerEvent::Unsolicited(
                             Response::CommandContinuationRequest(continuation),
@@ -195,11 +196,15 @@ impl Scheduler {
                         return Ok(SchedulerEvent::Unsolicited(Response::Data(data)));
                     }
                 }
-                ClientFlowEvent::ContinuationReceived { continuation } => {
+                ClientFlowEvent::ContinuationRequestReceived {
+                    continuation_request,
+                } => {
                     if let Some(continuation) = trickle_down(
-                        continuation,
+                        continuation_request,
                         self.active_tasks.tasks_mut(),
-                        |task, continuation| task.process_continuation(continuation),
+                        |task, continuation_request| {
+                            task.process_continuation_request(continuation_request)
+                        },
                     ) {
                         return Ok(SchedulerEvent::Unsolicited(
                             Response::CommandContinuationRequest(continuation),
@@ -418,14 +423,14 @@ trait TaskAny {
     fn process_untagged(&mut self, status_body: StatusBody<'static>)
         -> Option<StatusBody<'static>>;
 
-    fn process_continuation(
+    fn process_continuation_request(
         &mut self,
-        continuation: CommandContinuationRequest<'static>,
+        continuation_request: CommandContinuationRequest<'static>,
     ) -> Option<CommandContinuationRequest<'static>>;
 
-    fn process_continuation_authenticate(
+    fn process_continuation_request_authenticate(
         &mut self,
-        continuation: CommandContinuationRequest<'static>,
+        continuation_request: CommandContinuationRequest<'static>,
     ) -> Result<AuthenticateData, CommandContinuationRequest<'static>>;
 
     fn process_bye(&mut self, bye: Bye<'static>) -> Option<Bye<'static>>;
@@ -448,18 +453,18 @@ where
         T::process_untagged(self, status_body)
     }
 
-    fn process_continuation(
+    fn process_continuation_request(
         &mut self,
-        continuation: CommandContinuationRequest<'static>,
+        continuation_request: CommandContinuationRequest<'static>,
     ) -> Option<CommandContinuationRequest<'static>> {
-        T::process_continuation(self, continuation)
+        T::process_continuation_request(self, continuation_request)
     }
 
-    fn process_continuation_authenticate(
+    fn process_continuation_request_authenticate(
         &mut self,
-        continuation: CommandContinuationRequest<'static>,
+        continuation_request: CommandContinuationRequest<'static>,
     ) -> Result<AuthenticateData, CommandContinuationRequest<'static>> {
-        T::process_continuation_authenticate(self, continuation)
+        T::process_continuation_request_authenticate(self, continuation_request)
     }
 
     fn process_bye(&mut self, bye: Bye<'static>) -> Option<Bye<'static>> {
