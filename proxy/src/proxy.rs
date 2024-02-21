@@ -382,9 +382,14 @@ fn handle_server_event(
             // TODO: log handle
             trace!(role = "p2s", "---> Authentication started");
         }
-        ClientFlowEvent::ContinuationAuthenticateReceived { continuation, .. } => {
-            trace!(response=%format!("{:?}", continuation).blue(), role = "s2p", "<--| Received authentication continue");
-            client_to_proxy.authenticate_continue(continuation).unwrap();
+        ClientFlowEvent::AuthenticateContinuationRequestReceived {
+            continuation_request,
+            ..
+        } => {
+            trace!(response=%format!("{:?}", continuation_request).blue(), role = "s2p", "<--| Received authentication continuation request");
+            client_to_proxy
+                .authenticate_continue(continuation_request)
+                .unwrap();
         }
         ClientFlowEvent::AuthenticateAccepted { status, .. } => {
             trace!(response=%format!("{:?}", status).blue(), role = "s2p", "<--| Received authentication accepted");
@@ -408,10 +413,12 @@ fn handle_server_event(
             let _handle = client_to_proxy.enqueue_status(status);
             // TODO: log handle
         }
-        ClientFlowEvent::ContinuationReceived { mut continuation } => {
-            trace!(response=%format!("{:?}", continuation).blue(), role = "s2p", "<--| Received continuation");
-            util::filter_capabilities_in_continuation(&mut continuation);
-            let _handle = client_to_proxy.enqueue_continuation(continuation);
+        ClientFlowEvent::ContinuationRequestReceived {
+            mut continuation_request,
+        } => {
+            trace!(response=%format!("{:?}", continuation_request).blue(), role = "s2p", "<--| Received continuation request");
+            util::filter_capabilities_in_continuation(&mut continuation_request);
+            let _handle = client_to_proxy.enqueue_continuation_request(continuation_request);
             // TODO: log handle
         }
         ClientFlowEvent::IdleCommandSent { handle: _handle } => {
@@ -420,15 +427,15 @@ fn handle_server_event(
         }
         ClientFlowEvent::IdleAccepted {
             handle: _handle,
-            continuation,
+            continuation_request,
         } => {
             // TODO: log handle
             trace!(
                 role = "s2p",
-                ?continuation,
-                "<--| Received continuation (idle)"
+                ?continuation_request,
+                "<--| Received continuation request (idle)"
             );
-            let _handle2 = client_to_proxy.idle_accept(continuation);
+            let _handle2 = client_to_proxy.idle_accept(continuation_request);
             // TODO: log handle2
         }
         ClientFlowEvent::IdleRejected {

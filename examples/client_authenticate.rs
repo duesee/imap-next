@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("{event:?}");
 
         match event {
-            ClientFlowEvent::ContinuationAuthenticateReceived { .. } => {
+            ClientFlowEvent::AuthenticateContinuationRequestReceived { .. } => {
                 if let Some(authenticate_data) = authenticate_data.pop_front() {
                     client.set_authenticate_data(authenticate_data).unwrap();
                 } else {
