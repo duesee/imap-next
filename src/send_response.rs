@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, fmt::Debug};
+use std::collections::VecDeque;
 
 use bytes::BytesMut;
 use imap_codec::encode::{Encoder, Fragment};
@@ -8,11 +8,7 @@ use crate::{
     stream::{AnyStream, StreamError},
 };
 
-#[derive(Debug)]
-pub struct SendResponseState<C: Encoder>
-where
-    C::Message<'static>: Debug,
-{
+pub struct SendResponseState<C: Encoder> {
     codec: C,
     // FIFO queue for responses that should be sent next.
     queued_responses: VecDeque<QueuedResponse<C>>,
@@ -23,10 +19,7 @@ where
     write_buffer: BytesMut,
 }
 
-impl<C: Encoder> SendResponseState<C>
-where
-    C::Message<'static>: Debug,
-{
+impl<C: Encoder> SendResponseState<C> {
     pub fn new(codec: C, write_buffer: BytesMut) -> Self {
         Self {
             codec,
@@ -90,19 +83,12 @@ where
 }
 
 /// A response that is queued but not sent yet.
-#[derive(Debug)]
-struct QueuedResponse<C: Encoder>
-where
-    C::Message<'static>: Debug,
-{
+struct QueuedResponse<C: Encoder> {
     handle: Option<ServerFlowResponseHandle>,
     response: C::Message<'static>,
 }
 
-impl<C: Encoder> QueuedResponse<C>
-where
-    C::Message<'static>: Debug,
-{
+impl<C: Encoder> QueuedResponse<C> {
     fn push_to_buffer(self, write_buffer: &mut BytesMut, codec: &C) -> CurrentResponse<C> {
         for fragment in codec.encode(&self.response) {
             let data = match fragment {
@@ -124,11 +110,7 @@ where
 }
 
 /// A response that is currently being sent.
-#[derive(Debug)]
-struct CurrentResponse<C: Encoder>
-where
-    C::Message<'static>: Debug,
-{
+struct CurrentResponse<C: Encoder> {
     handle: Option<ServerFlowResponseHandle>,
     response: C::Message<'static>,
 }

@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 
 use bytes::BytesMut;
 use imap_codec::{
@@ -9,6 +9,7 @@ use imap_types::{
     auth::AuthenticateData,
     command::Command,
     response::{CommandContinuationRequest, Data, Greeting, Response, Status},
+    secret::Secret,
 };
 use thiserror::Error;
 
@@ -23,7 +24,7 @@ use crate::{
 static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ClientFlowCommandHandle> =
     HandleGeneratorGenerator::new();
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct ClientFlowOptions {
     pub crlf_relaxed: bool,
@@ -39,13 +40,19 @@ impl Default for ClientFlowOptions {
     }
 }
 
-#[derive(Debug)]
 pub struct ClientFlow {
     stream: AnyStream,
-
     handle_generator: HandleGenerator<ClientFlowCommandHandle>,
     send_command_state: SendCommandState,
     receive_response_state: ReceiveState<ResponseCodec>,
+}
+
+impl Debug for ClientFlow {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        f.debug_struct("ClientFlow")
+            .field("handle_generator", &self.handle_generator)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ClientFlow {
@@ -69,11 +76,15 @@ impl ClientFlow {
                 GreetingDecodeError::Failed | GreetingDecodeError::Incomplete,
             ) => {
                 let discarded_bytes = receive_greeting_state.discard_message();
-                return Err(ClientFlowError::MalformedMessage { discarded_bytes });
+                return Err(ClientFlowError::MalformedMessage {
+                    discarded_bytes: Secret::new(discarded_bytes),
+                });
             }
             ReceiveEvent::ExpectedCrlfGotLf => {
                 let discarded_bytes = receive_greeting_state.discard_message();
-                return Err(ClientFlowError::ExpectedCrlfGotLf { discarded_bytes });
+                return Err(ClientFlowError::ExpectedCrlfGotLf {
+                    discarded_bytes: Secret::new(discarded_bytes),
+                });
             }
         };
 
@@ -178,11 +189,15 @@ impl ClientFlow {
                     ResponseDecodeError::Failed | ResponseDecodeError::Incomplete,
                 ) => {
                     let discarded_bytes = self.receive_response_state.discard_message();
-                    return Err(ClientFlowError::MalformedMessage { discarded_bytes });
+                    return Err(ClientFlowError::MalformedMessage {
+                        discarded_bytes: Secret::new(discarded_bytes),
+                    });
                 }
                 ReceiveEvent::ExpectedCrlfGotLf => {
                     let discarded_bytes = self.receive_response_state.discard_message();
-                    return Err(ClientFlowError::ExpectedCrlfGotLf { discarded_bytes });
+                    return Err(ClientFlowError::ExpectedCrlfGotLf {
+                        discarded_bytes: Secret::new(discarded_bytes),
+                    });
                 }
             };
 
@@ -385,7 +400,7 @@ pub enum ClientFlowError {
     #[error(transparent)]
     Stream(#[from] StreamError),
     #[error("Expected `\\r\\n`, got `\\n`")]
-    ExpectedCrlfGotLf { discarded_bytes: Box<[u8]> },
+    ExpectedCrlfGotLf { discarded_bytes: Secret<Box<[u8]>> },
     #[error("Received malformed message")]
-    MalformedMessage { discarded_bytes: Box<[u8]> },
+    MalformedMessage { discarded_bytes: Secret<Box<[u8]>> },
 }
