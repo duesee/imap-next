@@ -105,7 +105,10 @@ impl ServerTester {
         let error = server.progress().await.unwrap_err();
         match error {
             ServerFlowError::ExpectedCrlfGotLf { discarded_bytes } => {
-                assert_eq!(expected_bytes.as_bstr(), discarded_bytes.as_bstr());
+                assert_eq!(
+                    expected_bytes.as_bstr(),
+                    discarded_bytes.declassify().as_bstr()
+                );
             }
             error => {
                 panic!("Server has unexpected error: {error:?}");
@@ -118,7 +121,10 @@ impl ServerTester {
         let error = server.progress().await.unwrap_err();
         match error {
             ServerFlowError::MalformedMessage { discarded_bytes } => {
-                assert_eq!(expected_bytes.as_bstr(), discarded_bytes.as_bstr());
+                assert_eq!(
+                    expected_bytes.as_bstr(),
+                    discarded_bytes.declassify().as_bstr()
+                );
             }
             error => {
                 panic!("Server has unexpected error: {error:?}");
@@ -131,7 +137,10 @@ impl ServerTester {
         let error = server.progress().await.unwrap_err();
         match error {
             ServerFlowError::LiteralTooLong { discarded_bytes } => {
-                assert_eq!(expected_bytes.as_bstr(), discarded_bytes.as_bstr());
+                assert_eq!(
+                    expected_bytes.as_bstr(),
+                    discarded_bytes.declassify().as_bstr()
+                );
             }
             error => {
                 panic!("Server has unexpected error: {error:?}");

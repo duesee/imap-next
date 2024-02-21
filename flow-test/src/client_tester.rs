@@ -161,7 +161,10 @@ impl ClientTester {
         let error = self.receive_error().await;
         match error {
             ClientFlowError::ExpectedCrlfGotLf { discarded_bytes } => {
-                assert_eq!(expected_bytes.as_bstr(), discarded_bytes.as_bstr());
+                assert_eq!(
+                    expected_bytes.as_bstr(),
+                    discarded_bytes.declassify().as_bstr()
+                );
             }
             error => {
                 panic!("Client emitted unexpected error: {error:?}");
@@ -173,7 +176,10 @@ impl ClientTester {
         let error = self.receive_error().await;
         match error {
             ClientFlowError::MalformedMessage { discarded_bytes } => {
-                assert_eq!(expected_bytes.as_bstr(), discarded_bytes.as_bstr());
+                assert_eq!(
+                    expected_bytes.as_bstr(),
+                    discarded_bytes.declassify().as_bstr()
+                );
             }
             error => {
                 panic!("Client emitted unexpected error: {error:?}");

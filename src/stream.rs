@@ -1,18 +1,18 @@
-use std::{fmt::Debug, num::NonZeroUsize, pin::Pin};
+use std::{num::NonZeroUsize, pin::Pin};
 
 use bytes::{Buf, BytesMut};
 use imap_types::utils::escape_byte_string;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+#[cfg(debug_assertions)]
 use tracing::trace;
 
 // TODO: Reconsider this. Do we really need Stream + AnyStream? What is the smallest API that we need to expose?
 
-pub trait Stream: AsyncRead + AsyncWrite + Send + Debug {}
+pub trait Stream: AsyncRead + AsyncWrite + Send {}
 
-impl<S: AsyncRead + AsyncWrite + Send + Debug> Stream for S {}
+impl<S: AsyncRead + AsyncWrite + Send> Stream for S {}
 
-#[derive(Debug)]
 pub struct AnyStream(pub Pin<Box<dyn Stream>>);
 
 impl AnyStream {
@@ -27,6 +27,7 @@ impl AnyStream {
         let old_len = read_buffer.len();
         let byte_count = self.0.read_buf(read_buffer).await?;
 
+        #[cfg(debug_assertions)]
         trace!(
             data = escape_byte_string(&read_buffer[old_len..]),
             "io/read/raw"
@@ -49,6 +50,7 @@ impl AnyStream {
     pub async fn write_all(&mut self, write_buffer: &mut BytesMut) -> Result<(), StreamError> {
         while !write_buffer.is_empty() {
             let byte_count = self.0.write(write_buffer).await?;
+            #[cfg(debug_assertions)]
             trace!(
                 data = escape_byte_string(&write_buffer[..byte_count]),
                 "io/write/raw"

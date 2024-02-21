@@ -1,4 +1,7 @@
-use std::{fmt::Debug, future::pending};
+use std::{
+    fmt::{Debug, Formatter},
+    future::pending,
+};
 
 use bytes::BytesMut;
 use imap_codec::{
@@ -11,6 +14,7 @@ use imap_types::{
     core::{LiteralMode, Tag, Text},
     extensions::idle::IdleDone,
     response::{CommandContinuationRequest, Data, Greeting, Response, Status},
+    secret::Secret,
 };
 use thiserror::Error;
 
@@ -25,7 +29,7 @@ use crate::{
 static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ServerFlowResponseHandle> =
     HandleGeneratorGenerator::new();
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct ServerFlowOptions {
     pub crlf_relaxed: bool,
@@ -49,14 +53,21 @@ impl Default for ServerFlowOptions {
     }
 }
 
-#[derive(Debug)]
 pub struct ServerFlow {
     stream: AnyStream,
     options: ServerFlowOptions,
-
     handle_generator: HandleGenerator<ServerFlowResponseHandle>,
     send_response_state: SendResponseState<ResponseCodec>,
     receive_command_state: ServerReceiveState,
+}
+
+impl Debug for ServerFlow {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        f.debug_struct("ServerFlow")
+            .field("options", &self.options)
+            .field("handle_generator", &self.handle_generator)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ServerFlow {
@@ -249,7 +260,9 @@ impl ServerFlow {
 
                                     let discarded_bytes = state.discard_message();
 
-                                    Err(ServerFlowError::LiteralTooLong { discarded_bytes })
+                                    Err(ServerFlowError::LiteralTooLong {
+                                        discarded_bytes: Secret::new(discarded_bytes),
+                                    })
                                 }
                                 LiteralMode::NonSync => {
                                     // TODO: We can't (reliably) make the client stop sending data.
@@ -262,7 +275,9 @@ impl ServerFlow {
                                     //       The LITERAL+ RFC has some recommendations.
                                     let discarded_bytes = state.discard_message();
 
-                                    Err(ServerFlowError::LiteralTooLong { discarded_bytes })
+                                    Err(ServerFlowError::LiteralTooLong {
+                                        discarded_bytes: Secret::new(discarded_bytes),
+                                    })
                                 }
                             }
                         } else {
@@ -294,11 +309,15 @@ impl ServerFlow {
                         CommandDecodeError::Failed | CommandDecodeError::Incomplete,
                     ) => {
                         let discarded_bytes = state.discard_message();
-                        Err(ServerFlowError::MalformedMessage { discarded_bytes })
+                        Err(ServerFlowError::MalformedMessage {
+                            discarded_bytes: Secret::new(discarded_bytes),
+                        })
                     }
                     ReceiveEvent::ExpectedCrlfGotLf => {
                         let discarded_bytes = state.discard_message();
-                        Err(ServerFlowError::ExpectedCrlfGotLf { discarded_bytes })
+                        Err(ServerFlowError::ExpectedCrlfGotLf {
+                            discarded_bytes: Secret::new(discarded_bytes),
+                        })
                     }
                 }
             }
@@ -315,11 +334,15 @@ impl ServerFlow {
                         | AuthenticateDataDecodeError::Incomplete,
                     ) => {
                         let discarded_bytes = state.discard_message();
-                        Err(ServerFlowError::MalformedMessage { discarded_bytes })
+                        Err(ServerFlowError::MalformedMessage {
+                            discarded_bytes: Secret::new(discarded_bytes),
+                        })
                     }
                     ReceiveEvent::ExpectedCrlfGotLf => {
                         let discarded_bytes = state.discard_message();
-                        Err(ServerFlowError::ExpectedCrlfGotLf { discarded_bytes })
+                        Err(ServerFlowError::ExpectedCrlfGotLf {
+                            discarded_bytes: Secret::new(discarded_bytes),
+                        })
                     }
                 }
             }
@@ -342,11 +365,15 @@ impl ServerFlow {
                     IdleDoneDecodeError::Failed | IdleDoneDecodeError::Incomplete,
                 ) => {
                     let discarded_bytes = state.discard_message();
-                    Err(ServerFlowError::MalformedMessage { discarded_bytes })
+                    Err(ServerFlowError::MalformedMessage {
+                        discarded_bytes: Secret::new(discarded_bytes),
+                    })
                 }
                 ReceiveEvent::ExpectedCrlfGotLf => {
                     let discarded_bytes = state.discard_message();
-                    Err(ServerFlowError::ExpectedCrlfGotLf { discarded_bytes })
+                    Err(ServerFlowError::ExpectedCrlfGotLf {
+                        discarded_bytes: Secret::new(discarded_bytes),
+                    })
                 }
             },
             ServerReceiveState::Dummy => {
@@ -425,7 +452,7 @@ impl ServerFlow {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 enum NextExpectedMessage {
     Command,
     AuthenticateData,
@@ -433,7 +460,6 @@ enum NextExpectedMessage {
     IdleDone,
 }
 
-#[derive(Debug)]
 enum ServerReceiveState {
     Command(ReceiveState<CommandCodec>),
     AuthenticateData(ReceiveState<AuthenticateDataCodec>),
@@ -564,13 +590,12 @@ pub enum ServerFlowError {
     #[error(transparent)]
     Stream(#[from] StreamError),
     #[error("Expected `\\r\\n`, got `\\n`")]
-    ExpectedCrlfGotLf { discarded_bytes: Box<[u8]> },
+    ExpectedCrlfGotLf { discarded_bytes: Secret<Box<[u8]>> },
     #[error("Received malformed message")]
-    MalformedMessage { discarded_bytes: Box<[u8]> },
+    MalformedMessage { discarded_bytes: Secret<Box<[u8]>> },
     #[error("Literal was rejected because it was too long")]
-    LiteralTooLong { discarded_bytes: Box<[u8]> },
+    LiteralTooLong { discarded_bytes: Secret<Box<[u8]>> },
 }
 
 /// A dummy codec we use for technical reasons when we don't want to receive anything at all.
-#[derive(Debug)]
 struct NoCodec;

@@ -4,7 +4,6 @@ use imap_codec::decode::Decoder;
 
 use crate::stream::{AnyStream, StreamError};
 
-#[derive(Debug)]
 pub struct ReceiveState<C> {
     codec: C,
     crlf_relaxed: bool,
