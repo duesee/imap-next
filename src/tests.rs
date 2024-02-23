@@ -79,7 +79,7 @@ async fn self_test() {
                     .unwrap(),
                 );
             }
-            ClientFlowEvent::AuthenticateRejected { .. } => break,
+            ClientFlowEvent::AuthenticateStatusReceived { .. } => break,
             _ => {}
         }
     }

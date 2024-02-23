@@ -390,15 +390,8 @@ fn handle_server_event(
                 .unwrap();
             trace!(role = "p2c", ?handle, "authenticate_continue");
         }
-        ClientFlowEvent::AuthenticateAccepted { status, .. } => {
-            trace!(role = "s2p", authenticate_accepted_status=%format!("{:?}", status).blue(), "<--|");
-
-            // TODO(#145): Fix unwrap
-            let handle = client_to_proxy.authenticate_finish(status).unwrap();
-            trace!(role = "p2c", ?handle, "authenticate_finish");
-        }
-        ClientFlowEvent::AuthenticateRejected { status, .. } => {
-            trace!(role = "s2p", authenticate_rejected_status=%format!("{:?}", status).blue(), "<--|");
+        ClientFlowEvent::AuthenticateStatusReceived { status, .. } => {
+            trace!(role = "s2p", authenticate_status=%format!("{:?}", status).blue(), "<--|");
 
             // TODO(#145): Fix unwrap
             let handle = client_to_proxy.authenticate_finish(status).unwrap();

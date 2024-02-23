@@ -217,15 +217,11 @@ impl ClientFlow {
                             SendCommandTermination::AuthenticateAccepted {
                                 handle,
                                 command_authenticate,
-                            } => ClientFlowEvent::AuthenticateAccepted {
+                            }
+                            | SendCommandTermination::AuthenticateRejected {
                                 handle,
                                 command_authenticate,
-                                status,
-                            },
-                            SendCommandTermination::AuthenticateRejected {
-                                handle,
-                                command_authenticate,
-                            } => ClientFlowEvent::AuthenticateRejected {
+                            } => ClientFlowEvent::AuthenticateStatusReceived {
                                 handle,
                                 command_authenticate,
                                 status,
@@ -347,20 +343,13 @@ pub enum ClientFlowEvent {
     /// The client MUST call [`ClientFlow::authenticate_continue`] next.
     ///
     /// Note: The client can also progress the authentication by sending [`AuthenticateData::Cancel`].
-    /// However, it's up to the server to abort the authentication flow by sending a tagged status
-    /// response. In this case, the client will receive either a [`ClientFlowEvent::AuthenticateAccepted`]
-    /// or [`ClientFlowEvent::AuthenticateRejected`] event.
+    /// However, it's up to the server to abort the authentication flow by sending a tagged status response.
     AuthenticateContinuationRequestReceived {
         /// Handle to the enqueued [`Command`].
         handle: ClientFlowCommandHandle,
         continuation_request: CommandContinuationRequest<'static>,
     },
-    AuthenticateAccepted {
-        handle: ClientFlowCommandHandle,
-        command_authenticate: CommandAuthenticate,
-        status: Status<'static>,
-    },
-    AuthenticateRejected {
+    AuthenticateStatusReceived {
         handle: ClientFlowCommandHandle,
         command_authenticate: CommandAuthenticate,
         status: Status<'static>,
