@@ -47,10 +47,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         .unwrap();
                 }
             }
-            ClientFlowEvent::AuthenticateAccepted { .. } => {
-                break;
-            }
-            ClientFlowEvent::AuthenticateRejected { .. } => {
+            ClientFlowEvent::AuthenticateStatusReceived { .. } => {
                 break;
             }
             _ => {}

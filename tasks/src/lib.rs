@@ -161,20 +161,7 @@ impl Scheduler {
                         ));
                     }
                 }
-                ClientFlowEvent::AuthenticateAccepted { handle, status, .. } => {
-                    let (_, _, task) = self.active_tasks.remove_by_handle(handle).unwrap();
-
-                    let body = match status {
-                        Status::Untagged(_) => unreachable!(),
-                        Status::Tagged(tagged) => tagged.body,
-                        Status::Bye(_) => unreachable!(),
-                    };
-
-                    let output = Some(task.process_tagged(body));
-
-                    return Ok(SchedulerEvent::TaskFinished(TaskToken { handle, output }));
-                }
-                ClientFlowEvent::AuthenticateRejected { handle, status, .. } => {
+                ClientFlowEvent::AuthenticateStatusReceived { handle, status, .. } => {
                     let (_, _, task) = self.active_tasks.remove_by_handle(handle).unwrap();
 
                     let body = match status {
