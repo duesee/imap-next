@@ -97,8 +97,8 @@ impl Proxy<BoundState> {
                     config
                 };
 
-                // TODO: The acceptor should really be part of the proxy initialization.
-                //       However, for testing purposes, it's nice to create it on-the-fly.
+                // TODO(#146): The acceptor should really be part of the proxy initialization.
+                //             However, for testing purposes, it's nice to create it on-the-fly.
                 let acceptor = TlsAcceptor::from(Arc::new(config));
 
                 AnyStream::new(acceptor.accept(client_to_proxy).await?)
@@ -194,7 +194,7 @@ impl State for ConnectedState {}
 impl Proxy<ConnectedState> {
     pub async fn start_conversation(self) {
         let (mut proxy_to_server, mut greeting) = {
-            // TODO: Read options from config
+            // TODO(#144): Read options from config
             let options = ClientFlowOptions::default();
 
             let result = ClientFlow::receive_greeting(self.state.proxy_to_server, options).await;
@@ -212,7 +212,7 @@ impl Proxy<ConnectedState> {
         util::filter_capabilities_in_greeting(&mut greeting);
 
         let (mut client_to_proxy, _) = {
-            // TODO: Read options from config
+            // TODO(#144): Read options from config
             let mut options = ServerFlowOptions::default();
             options.literal_accept_text = Text::try_from(LITERAL_ACCEPT_TEXT).unwrap();
             options.literal_reject_text = Text::try_from(LITERAL_REJECT_TEXT).unwrap();
@@ -296,7 +296,7 @@ fn handle_client_event(
         ServerFlowEvent::AuthenticateDataReceived { authenticate_data } => {
             trace!(role = "c2p", authenticate_data=%format!("{:?}", authenticate_data).red(), "|-->");
 
-            // TODO: Fix unwrap
+            // TODO(#145): Fix unwrap
             let handle = proxy_to_server
                 .set_authenticate_data(authenticate_data)
                 .unwrap();
@@ -393,14 +393,14 @@ fn handle_server_event(
         ClientFlowEvent::AuthenticateAccepted { status, .. } => {
             trace!(role = "s2p", authenticate_accepted_status=%format!("{:?}", status).blue(), "<--|");
 
-            // TODO: Fix unwrap
+            // TODO(#145): Fix unwrap
             let handle = client_to_proxy.authenticate_finish(status).unwrap();
             trace!(role = "p2c", ?handle, "authenticate_finish");
         }
         ClientFlowEvent::AuthenticateRejected { status, .. } => {
             trace!(role = "s2p", authenticate_rejected_status=%format!("{:?}", status).blue(), "<--|");
 
-            // TODO: Fix unwrap
+            // TODO(#145): Fix unwrap
             let handle = client_to_proxy.authenticate_finish(status).unwrap();
             trace!(role = "p2c", ?handle, "authenticate_finish");
         }
@@ -444,14 +444,14 @@ fn handle_server_event(
                 "<--|"
             );
 
-            // TODO: Fix unwrap
+            // TODO(#145): Fix unwrap
             let handle = client_to_proxy.idle_accept(continuation_request).unwrap();
             trace!(role = "p2c", ?handle, "idle_accept");
         }
         ClientFlowEvent::IdleRejected { handle, status } => {
             trace!(role = "s2p", ?handle, idle_rejected_status=%format!("{:?}", status).blue(), "<--|");
 
-            // TODO: Fix unwrap
+            // TODO(#145): Fix unwrap
             let handle = client_to_proxy.idle_reject(status).unwrap();
             trace!(role = "p2c", ?handle, "idle_reject");
         }
