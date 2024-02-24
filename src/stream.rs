@@ -1,6 +1,7 @@
 use std::{num::NonZeroUsize, pin::Pin};
 
 use bytes::{Buf, BytesMut};
+#[cfg(debug_assertions)]
 use imap_types::utils::escape_byte_string;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -24,6 +25,7 @@ impl AnyStream {
     ///
     /// Returns [`StreamError::Closed`] when no bytes could be read.
     pub async fn read(&mut self, read_buffer: &mut BytesMut) -> Result<NonZeroUsize, StreamError> {
+        #[cfg(debug_assertions)]
         let old_len = read_buffer.len();
         let byte_count = self.0.read_buf(read_buffer).await?;
 
