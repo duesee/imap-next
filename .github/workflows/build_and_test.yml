@@ -22,7 +22,6 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -33,7 +32,8 @@ jobs:
 
       - name: Check
         run: |
-          cargo hack check --workspace
+          RUSTFLAGS="-D warnings" cargo hack check --workspace --all-targets
+          RUSTFLAGS="-D warnings" cargo hack check --workspace --all-targets --release
 
   test:
     strategy:
