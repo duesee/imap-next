@@ -45,7 +45,7 @@ impl<H: Handle> Debug for HandleGenerator<H> {
 impl<H: Handle> HandleGenerator<H> {
     pub fn generate(&mut self) -> H {
         let handle_id = self.next_handle_id;
-        self.next_handle_id += self.next_handle_id.wrapping_add(1);
+        self.next_handle_id = self.next_handle_id.wrapping_add(1);
 
         H::from_raw(RawHandle {
             generator_id: self.generator_id,
