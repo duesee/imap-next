@@ -81,3 +81,32 @@ impl<H: Handle> HandleGeneratorGenerator<H> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Handle, HandleGeneratorGenerator, RawHandle};
+
+    struct TestHandle(RawHandle);
+
+    impl Handle for TestHandle {
+        fn from_raw(raw_handle: RawHandle) -> Self {
+            Self(raw_handle)
+        }
+    }
+
+    #[test]
+    fn generated_handles_have_expected_ids() {
+        let gen_gen = HandleGeneratorGenerator::<TestHandle>::new();
+
+        for expected_generator_id in 0..100 {
+            let mut gen = gen_gen.generate();
+
+            for expected_handle_id in 0..100 {
+                let handle = gen.generate();
+
+                assert_eq!(expected_generator_id, handle.0.generator_id);
+                assert_eq!(expected_handle_id, handle.0.handle_id);
+            }
+        }
+    }
+}
