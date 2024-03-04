@@ -24,14 +24,27 @@ impl AnyStream {
     /// Reads at least one byte into the buffer and returns the number of read bytes.
     ///
     /// Returns [`StreamError::Closed`] when no bytes could be read.
-    pub async fn read(&mut self, read_buffer: &mut BytesMut) -> Result<NonZeroUsize, StreamError> {
-        #[cfg(debug_assertions)]
-        let old_len = read_buffer.len();
-        let byte_count = self.0.read_buf(read_buffer).await?;
+    pub async fn read(&mut self, read_buffer: &mut ReadBuffer) -> Result<NonZeroUsize, ReadError> {
+        let current_len = read_buffer.bytes.len();
+
+        let byte_count = match read_buffer.limit {
+            None => self.0.read_buf(&mut read_buffer.bytes).await?,
+            Some(limit) => {
+                let remaining_byte_count = limit.saturating_sub(current_len);
+                if remaining_byte_count == 0 {
+                    return Err(ReadError::BufferLimitReached);
+                }
+
+                (&mut self.0)
+                    .take(remaining_byte_count as u64)
+                    .read_buf(&mut read_buffer.bytes)
+                    .await?
+            }
+        };
 
         #[cfg(debug_assertions)]
         trace!(
-            data = escape_byte_string(&read_buffer[old_len..]),
+            data = escape_byte_string(&read_buffer.bytes[current_len..]),
             "io/read/raw"
         );
 
@@ -40,7 +53,7 @@ impl AnyStream {
                 // The result is 0 if the stream reached "end of file" or the read buffer was
                 // already full before calling `read_buf`. Because we use an unlimited buffer we
                 // know that the first case occurred.
-                Err(StreamError::Closed)
+                Err(ReadError::Closed)
             }
             Some(byte_count) => Ok(byte_count),
         }
@@ -49,21 +62,21 @@ impl AnyStream {
     /// Writes all bytes from the write buffer.
     ///
     /// Returns [`StreamError::Closed`] when not all bytes could be written.
-    pub async fn write_all(&mut self, write_buffer: &mut BytesMut) -> Result<(), StreamError> {
-        while !write_buffer.is_empty() {
-            let byte_count = self.0.write(write_buffer).await?;
+    pub async fn write_all(&mut self, write_buffer: &mut WriteBuffer) -> Result<(), WriteError> {
+        while !write_buffer.bytes.is_empty() {
+            let byte_count = self.0.write(&write_buffer.bytes).await?;
             #[cfg(debug_assertions)]
             trace!(
-                data = escape_byte_string(&write_buffer[..byte_count]),
+                data = escape_byte_string(&write_buffer.bytes[..byte_count]),
                 "io/write/raw"
             );
-            write_buffer.advance(byte_count);
+            write_buffer.bytes.advance(byte_count);
 
             if byte_count == 0 {
                 // The result is 0 if the stream doesn't accept bytes anymore or the write buffer
                 // was already empty before calling `write_buf`. Because we checked the buffer
                 // we know that the first case occurred.
-                return Err(StreamError::Closed);
+                return Err(WriteError::Closed);
             }
         }
 
@@ -71,16 +84,50 @@ impl AnyStream {
     }
 }
 
-/// Error during reading from or writing to a [`Stream`].
+/// Error raised by [`AnyStream::read`].
 #[derive(Debug, Error)]
-pub enum StreamError {
+pub enum ReadError {
     /// The operation failed because the stream is closed.
     ///
-    /// We detect this by checking if the read or written byte count is 0. Whether the stream is
+    /// We detect this by checking if the read byte count is 0. Whether the stream is
     /// closed indefinitely or temporarily depend on the actual stream implementation.
     #[error("Stream was closed")]
     Closed,
     /// An I/O error occurred in the underlying stream.
     #[error(transparent)]
     Io(#[from] tokio::io::Error),
+    /// Can't read more bytes because the buffer limit is already reached.
+    #[error("Read buffer has overflown")]
+    BufferLimitReached,
+}
+
+/// Error raised by [`AnyStream::write_all`].
+#[derive(Debug, Error)]
+pub enum WriteError {
+    /// The operation failed because the stream is closed.
+    ///
+    /// We detect this by checking if the written byte count is 0. Whether the stream is
+    /// closed indefinitely or temporarily depend on the actual stream implementation.
+    #[error("Stream was closed")]
+    Closed,
+    /// An I/O error occurred in the underlying stream.
+    #[error(transparent)]
+    Io(#[from] tokio::io::Error),
+}
+
+/// Buffer for reading bytes with [`AnyStream::read`].
+#[derive(Default)]
+pub struct ReadBuffer {
+    pub bytes: BytesMut,
+    /// The max number of bytes to be stored in `bytes`.
+    ///
+    /// If the maximum number is reached and [`AnyStream::read`] is called,
+    /// it results in [`ReadError::BufferLimitReached`].
+    pub limit: Option<usize>,
+}
+
+/// Buffer for writing bytes with [`AnyStream::write`].
+#[derive(Default)]
+pub struct WriteBuffer {
+    pub bytes: BytesMut,
 }
