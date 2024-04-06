@@ -52,6 +52,7 @@ async fn self_test() {
         }
     };
 
+    #[allow(clippy::let_underscore_future)]
     let _ = tokio::task::spawn(server);
 
     let (mut client, received_greeting) = {

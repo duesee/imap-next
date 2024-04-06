@@ -169,9 +169,7 @@ impl SendCommandState {
     /// Handles the received continuation request for an authenticate data.
     pub fn authenticate_continue(&mut self) -> Option<ClientFlowCommandHandle> {
         // Check whether in correct state
-        let Some(current_command) = self.current_command.take() else {
-            return None;
-        };
+        let current_command = self.current_command.take()?;
         let CurrentCommand::Authenticate(state) = current_command else {
             self.current_command = Some(current_command);
             return None;
@@ -231,9 +229,7 @@ impl SendCommandState {
     /// Handles the received continuation request for the idle done.
     pub fn idle_continue(&mut self) -> Option<ClientFlowCommandHandle> {
         // Check whether in correct state
-        let Some(current_command) = self.current_command.take() else {
-            return None;
-        };
+        let current_command = self.current_command.take()?;
         let CurrentCommand::Idle(state) = current_command else {
             self.current_command = Some(current_command);
             return None;
@@ -255,9 +251,7 @@ impl SendCommandState {
     /// Sends the requested idle done to the server.
     pub fn set_idle_done(&mut self) -> Option<ClientFlowCommandHandle> {
         // Check whether in correct state
-        let Some(current_command) = self.current_command.take() else {
-            return None;
-        };
+        let current_command = self.current_command.take()?;
         let CurrentCommand::Idle(state) = current_command else {
             self.current_command = Some(current_command);
             return None;
