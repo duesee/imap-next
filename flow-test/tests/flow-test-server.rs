@@ -32,7 +32,7 @@ fn noop_with_large_lines() {
     let greeting = &mut b"* OK ".to_vec();
     greeting.extend(vec![b'.'; LARGE]);
     greeting.extend(b"\r\n");
-    rt.run2(server.send_greeting(&greeting), client.receive(&greeting));
+    rt.run2(server.send_greeting(greeting), client.receive(greeting));
 
     let noop = b"A1 NOOP\r\n";
     rt.run2(client.send(noop), server.receive_command(noop));
