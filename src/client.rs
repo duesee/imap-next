@@ -340,7 +340,7 @@ pub enum ClientFlowEvent {
     },
     /// Server is requesting (more) authentication data.
     ///
-    /// The client MUST call [`ClientFlow::authenticate_continue`] next.
+    /// The client MUST call [`SendCommandState::authenticate_continue`] next.
     ///
     /// Note: The client can also progress the authentication by sending [`AuthenticateData::Cancel`].
     /// However, it's up to the server to abort the authentication flow by sending a tagged status response.

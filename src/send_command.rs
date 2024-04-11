@@ -614,7 +614,7 @@ enum AuthenticateActivity {
     WaitingForAuthenticateResponse,
     /// Waiting until the client flow user provides the authenticate data.
     ///
-    /// Specifically, [`ClientFlow::set_authenticate_data`].
+    /// Specifically, [`SendCommandState::set_authenticate_data`].
     WaitingForAuthenticateDataSet,
     /// Pushing the authenticate data to the write buffer.
     PushingAuthenticateData { authenticate_data: Vec<u8> },
@@ -679,7 +679,7 @@ enum IdleActivity {
     WaitingForIdleResponse,
     /// Waiting until the client flow user triggers idle done.
     ///
-    /// Specifically, [`ClientFlow::set_idle_done`].
+    /// Specifically, [`SendCommandState::set_idle_done`].
     WaitingForIdleDoneSet,
     /// Pushing the idle done to the write buffer.
     PushingIdleDone { idle_done: Vec<u8> },
