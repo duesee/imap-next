@@ -8,5 +8,5 @@ license = "MIT OR Apache-2.0"
 imap-flow = { path = ".." }
 imap-types = "2.0.0"
 tag-generator = { path = "../tag-generator" }
-thiserror = "1.0.50"
-tokio = { version = "1.32.0", features = ["full"] }
+thiserror = "1.0.58"
+tokio = { version = "1.37.0", features = ["full"] }
