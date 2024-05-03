@@ -1,10 +1,7 @@
-use imap_flow::{
-    client::{ClientFlow, ClientFlowOptions},
-    stream::AnyStream,
-};
+use imap_flow::{client::ClientFlowOptions, stream::AnyStream};
 use imap_types::response::{Response, Status};
 use tasks::{
-    tasks::{AuthenticatePlainTask, CapabilityTask, LogoutTask},
+    tasks::{authenticate::AuthenticateTask, capability::CapabilityTask, logout::LogoutTask},
     Scheduler, SchedulerEvent,
 };
 use tokio::net::TcpStream;
@@ -12,15 +9,10 @@ use tokio::net::TcpStream;
 #[tokio::main]
 async fn main() {
     let mut scheduler = {
-        let (flow, _) = {
-            let stream = TcpStream::connect("127.0.0.1:12345").await.unwrap();
-
-            ClientFlow::receive_greeting(AnyStream::new(stream), ClientFlowOptions::default())
-                .await
-                .unwrap()
-        };
-
-        Scheduler::new(flow)
+        let stream = TcpStream::connect("127.0.0.1:12345").await.unwrap();
+        Scheduler::try_new_flow(AnyStream::new(stream), ClientFlowOptions::default())
+            .await
+            .unwrap()
     };
 
     let handle1 = scheduler.enqueue_task(CapabilityTask::default());
@@ -43,7 +35,7 @@ async fn main() {
         }
     }
 
-    let handle2 = scheduler.enqueue_task(AuthenticatePlainTask::new("alice", "pa²²w0rd", true));
+    let handle2 = scheduler.enqueue_task(AuthenticateTask::new_plain("alice", "pa²²w0rd", true));
     let handle3 = scheduler.enqueue_task(LogoutTask::default());
 
     loop {

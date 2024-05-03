@@ -19,6 +19,7 @@ use crate::{
     types::CommandAuthenticate,
 };
 
+#[derive(Debug)]
 pub struct SendCommandState {
     command_codec: CommandCodec,
     authenticate_data_codec: AuthenticateDataCodec,
@@ -49,6 +50,16 @@ impl SendCommandState {
             current_command: None,
             write_buffer,
         }
+    }
+
+    pub fn is_waiting_for_idle_done_set(&self) -> bool {
+        matches!(
+            self.current_command,
+            Some(CurrentCommand::Idle(IdleState {
+                activity: IdleActivity::WaitingForIdleDoneSet,
+                ..
+            }))
+        )
     }
 
     pub fn enqueue(&mut self, handle: ClientFlowCommandHandle, command: Command<'static>) {
@@ -191,7 +202,7 @@ impl SendCommandState {
     pub fn set_authenticate_data(
         &mut self,
         authenticate_data: AuthenticateData<'static>,
-    ) -> Result<ClientFlowCommandHandle, AuthenticateData> {
+    ) -> Result<ClientFlowCommandHandle, AuthenticateData<'static>> {
         // Check whether in correct state
         let Some(current_command) = self.current_command.take() else {
             return Err(authenticate_data);
@@ -336,6 +347,7 @@ impl SendCommandState {
 }
 
 /// Queued (and not sent yet) command.
+#[derive(Debug)]
 struct QueuedCommand {
     handle: ClientFlowCommandHandle,
     command: Command<'static>,
@@ -396,6 +408,7 @@ impl QueuedCommand {
 }
 
 /// Currently being sent command.
+#[derive(Debug)]
 enum CurrentCommand {
     /// Sending state of regular command.
     Command(CommandState),
@@ -453,6 +466,7 @@ impl<S> FinishSendingResult<S> {
     }
 }
 
+#[derive(Debug)]
 struct CommandState {
     handle: ClientFlowCommandHandle,
     command: Command<'static>,
@@ -533,6 +547,7 @@ impl CommandState {
     }
 }
 
+#[derive(Debug)]
 enum CommandActivity {
     /// Pushing fragments to the write buffer.
     PushingFragments {
@@ -552,6 +567,7 @@ enum CommandActivity {
     },
 }
 
+#[derive(Debug)]
 struct AuthenticateState {
     handle: ClientFlowCommandHandle,
     command_authenticate: CommandAuthenticate,
@@ -603,6 +619,7 @@ impl AuthenticateState {
     }
 }
 
+#[derive(Debug)]
 enum AuthenticateActivity {
     /// Pushing the authenticate command to the write buffer.
     PushingAuthenticate { authenticate: Vec<u8> },
@@ -621,6 +638,7 @@ enum AuthenticateActivity {
     WaitingForAuthenticateDataSent,
 }
 
+#[derive(Debug)]
 struct IdleState {
     handle: ClientFlowCommandHandle,
     tag: Tag<'static>,
@@ -668,6 +686,7 @@ impl IdleState {
     }
 }
 
+#[derive(Debug)]
 enum IdleActivity {
     /// Pushing the idle command to the write buffer.
     PushingIdle { idle: Vec<u8> },

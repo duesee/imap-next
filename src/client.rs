@@ -1,4 +1,7 @@
-use std::fmt::{Debug, Formatter};
+use std::{
+    fmt::{Debug, Formatter},
+    time::Duration,
+};
 
 use bytes::BytesMut;
 use imap_codec::{
@@ -12,6 +15,7 @@ use imap_types::{
     secret::Secret,
 };
 use thiserror::Error;
+use tokio::sync::mpsc;
 
 use crate::{
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
@@ -23,6 +27,12 @@ use crate::{
 
 static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ClientFlowCommandHandle> =
     HandleGeneratorGenerator::new();
+
+/// The default IDLE timeout, in seconds, as defined in RFC2177.
+///
+/// > Clients using IDLE are advised to terminate the IDLE and
+/// re-issue it at least every 29 minutes to avoid being logged off.
+static DEFAULT_IDLE_TIMEOUT: u64 = 60 * 29;
 
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
@@ -45,12 +55,14 @@ pub struct ClientFlow {
     handle_generator: HandleGenerator<ClientFlowCommandHandle>,
     send_command_state: SendCommandState,
     receive_response_state: ReceiveState<ResponseCodec>,
+    idle_timeout: Option<u64>,
 }
 
 impl Debug for ClientFlow {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         f.debug_struct("ClientFlow")
             .field("handle_generator", &self.handle_generator)
+            .field("idle_timeout", &self.idle_timeout)
             .finish_non_exhaustive()
     }
 }
@@ -111,9 +123,22 @@ impl ClientFlow {
             handle_generator: HANDLE_GENERATOR_GENERATOR.generate(),
             send_command_state,
             receive_response_state,
+            idle_timeout: None,
         };
 
         Ok((client_flow, greeting))
+    }
+
+    pub fn set_some_idle_timeout(&mut self, secs: Option<u64>) {
+        self.idle_timeout = secs;
+    }
+
+    pub fn set_idle_timeout(&mut self, secs: u64) {
+        self.set_some_idle_timeout(Some(secs));
+    }
+
+    pub fn get_idle_timeout(&self) -> Duration {
+        Duration::from_secs(self.idle_timeout.unwrap_or(DEFAULT_IDLE_TIMEOUT))
     }
 
     /// Enqueues the [`Command`] for being sent to the client.
@@ -152,8 +177,22 @@ impl ClientFlow {
                 return Ok(event);
             }
 
-            if let Some(event) = self.progress_receive().await? {
-                return Ok(event);
+            if self.is_waiting_for_idle_done_set() {
+                let timeout =
+                    tokio::time::timeout(self.get_idle_timeout(), self.progress_receive());
+                match timeout.await {
+                    Ok(Ok(Some(event))) => break Ok(event),
+                    Ok(Ok(None)) => continue,
+                    Ok(Err(err)) => break Err(err),
+                    Err(_) => {
+                        self.set_idle_done();
+                        continue;
+                    }
+                }
+            } else {
+                if let Some(event) = self.progress_receive().await? {
+                    return Ok(event);
+                }
             }
         }
     }
@@ -272,13 +311,17 @@ impl ClientFlow {
     pub fn set_authenticate_data(
         &mut self,
         authenticate_data: AuthenticateData<'static>,
-    ) -> Result<ClientFlowCommandHandle, AuthenticateData> {
+    ) -> Result<ClientFlowCommandHandle, AuthenticateData<'static>> {
         self.send_command_state
             .set_authenticate_data(authenticate_data)
     }
 
     pub fn set_idle_done(&mut self) -> Option<ClientFlowCommandHandle> {
         self.send_command_state.set_idle_done()
+    }
+
+    pub fn is_waiting_for_idle_done_set(&self) -> bool {
+        self.send_command_state.is_waiting_for_idle_done_set()
     }
 
     #[cfg(feature = "expose_stream")]
@@ -393,6 +436,8 @@ pub enum ClientFlowEvent {
 pub enum ClientFlowError {
     #[error("Stream was closed")]
     StreamClosed,
+    #[error("Queue receiver was closed")]
+    QueueClosed(#[source] mpsc::error::SendError<()>),
     #[error(transparent)]
     Io(#[from] tokio::io::Error),
     #[error("Expected `\\r\\n`, got `\\n`")]

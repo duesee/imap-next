@@ -6,7 +6,8 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 imap-flow = { path = ".." }
-imap-types = "2.0.0"
+imap-types = { version = "2.0.0", features = ["ext_id", "ext_sort_thread", "ext_binary", "ext_uidplus"] }
 tag-generator = { path = "../tag-generator" }
 thiserror = "1.0.50"
 tokio = { version = "1.32.0", features = ["full"] }
+tracing = "0.1"

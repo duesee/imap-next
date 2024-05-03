@@ -127,7 +127,7 @@ pub struct ReadBuffer {
 }
 
 /// Buffer for writing bytes with [`AnyStream::write`].
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct WriteBuffer {
     pub bytes: BytesMut,
 }
