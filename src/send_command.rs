@@ -191,7 +191,7 @@ impl SendCommandState {
     pub fn set_authenticate_data(
         &mut self,
         authenticate_data: AuthenticateData<'static>,
-    ) -> Result<ClientFlowCommandHandle, AuthenticateData> {
+    ) -> Result<ClientFlowCommandHandle, AuthenticateData<'static>> {
         // Check whether in correct state
         let Some(current_command) = self.current_command.take() else {
             return Err(authenticate_data);
