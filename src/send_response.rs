@@ -1,95 +1,111 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, convert::Infallible};
 
-use imap_codec::encode::{Encoder, Fragment};
-
-use crate::{
-    server::ServerFlowResponseHandle,
-    stream::{AnyStream, WriteBuffer, WriteError},
+use imap_codec::{
+    encode::{Encoder, Fragment},
+    GreetingCodec, ResponseCodec,
 };
+use imap_types::response::{Greeting, Response};
 
-pub struct SendResponseState<C: Encoder> {
-    codec: C,
+use crate::{server::ServerFlowResponseHandle, FlowInterrupt, FlowIo};
+
+pub struct SendResponseState {
+    greeting_codec: GreetingCodec,
+    response_codec: ResponseCodec,
     // FIFO queue for responses that should be sent next.
-    queued_responses: VecDeque<QueuedResponse<C>>,
+    queued_responses: VecDeque<QueuedResponse>,
     // The response that is currently being sent.
-    current_response: Option<CurrentResponse<C>>,
-    // Used for writing the current response to the stream.
-    // Should be empty if `current_response` is `None`.
-    write_buffer: WriteBuffer,
+    current_response: Option<CurrentResponse>,
 }
 
-impl<C: Encoder> SendResponseState<C> {
-    pub fn new(codec: C, write_buffer: WriteBuffer) -> Self {
+impl SendResponseState {
+    pub fn new(greeting_codec: GreetingCodec, response_codec: ResponseCodec) -> Self {
         Self {
-            codec,
+            greeting_codec,
+            response_codec,
             queued_responses: VecDeque::new(),
             current_response: None,
-            write_buffer,
         }
     }
 
-    pub fn enqueue(
+    pub fn enqueue_greeting(&mut self, greeting: Greeting<'static>) {
+        self.queued_responses.push_back(QueuedResponse {
+            handle: None,
+            response: ResponseMessage::Greeting(greeting),
+        });
+    }
+
+    pub fn enqueue_response(
         &mut self,
         handle: Option<ServerFlowResponseHandle>,
-        response: C::Message<'static>,
+        response: Response<'static>,
     ) {
-        self.queued_responses
-            .push_back(QueuedResponse { handle, response });
+        self.queued_responses.push_back(QueuedResponse {
+            handle,
+            response: ResponseMessage::Response(response),
+        });
     }
 
-    pub fn finish(mut self) -> WriteBuffer {
-        self.write_buffer.bytes.clear();
-        self.write_buffer
-    }
-
-    pub async fn progress(
-        &mut self,
-        stream: &mut AnyStream,
-    ) -> Result<Option<SendResponseEvent<C>>, WriteError> {
-        let current_response = match self.current_response.take() {
+    pub fn progress(&mut self) -> Result<Option<SendResponseEvent>, FlowInterrupt<Infallible>> {
+        match self.current_response.take() {
             Some(current_response) => {
-                // We are currently sending a response but the sending process was cancelled.
-                // Continue the sending process.
-                current_response
+                // Continue the response that was interrupted.
+                let handle = current_response.handle;
+                let event = match current_response.response {
+                    ResponseMessage::Greeting(greeting) => SendResponseEvent::Greeting { greeting },
+                    ResponseMessage::Response(response) => {
+                        SendResponseEvent::Response { handle, response }
+                    }
+                };
+                Ok(Some(event))
             }
             None => {
-                assert!(self.write_buffer.bytes.is_empty());
-
                 let Some(queued_response) = self.queued_responses.pop_front() else {
                     // There is currently no response that needs to be sent
                     return Ok(None);
                 };
 
-                queued_response.push_to_buffer(&mut self.write_buffer, &self.codec)
+                // Creates a buffer for writing the current response
+                let mut write_buffer = Vec::new();
+
+                // Push the bytes of the response to the buffer
+                let current_response = queued_response.push_to_buffer(
+                    &mut write_buffer,
+                    &self.greeting_codec,
+                    &self.response_codec,
+                );
+
+                self.current_response = Some(current_response);
+
+                // Interrupt the flow for sendng all bytes of current response
+                Err(FlowInterrupt::Io(FlowIo::Output(write_buffer)))
             }
-        };
-
-        // Store the current response to ensure cancellation safety
-        self.current_response = Some(current_response);
-
-        // Send all bytes of current response
-        stream.write_all(&mut self.write_buffer).await?;
-
-        // Restore the current response, can't fail because we set it to `Some` above
-        let current_response = self.current_response.take().unwrap();
-
-        // We finished sending a response completely
-        Ok(Some(SendResponseEvent {
-            handle: current_response.handle,
-            response: current_response.response,
-        }))
+        }
     }
 }
 
-/// A response that is queued but not sent yet.
-struct QueuedResponse<C: Encoder> {
-    handle: Option<ServerFlowResponseHandle>,
-    response: C::Message<'static>,
+enum ResponseMessage {
+    Greeting(Greeting<'static>),
+    Response(Response<'static>),
 }
 
-impl<C: Encoder> QueuedResponse<C> {
-    fn push_to_buffer(self, write_buffer: &mut WriteBuffer, codec: &C) -> CurrentResponse<C> {
-        for fragment in codec.encode(&self.response) {
+/// A response that is queued but not sent yet.
+struct QueuedResponse {
+    handle: Option<ServerFlowResponseHandle>,
+    response: ResponseMessage,
+}
+
+impl QueuedResponse {
+    fn push_to_buffer(
+        self,
+        write_buffer: &mut Vec<u8>,
+        greeting_codec: &GreetingCodec,
+        response_codec: &ResponseCodec,
+    ) -> CurrentResponse {
+        let fragments = match &self.response {
+            ResponseMessage::Greeting(greeting) => greeting_codec.encode(greeting),
+            ResponseMessage::Response(response) => response_codec.encode(response),
+        };
+        for fragment in fragments {
             let data = match fragment {
                 Fragment::Line { data } => data,
                 // Note: The server doesn't need to wait before sending a literal.
@@ -98,7 +114,7 @@ impl<C: Encoder> QueuedResponse<C> {
                 //       see https://github.com/duesee/imap-codec/issues/332
                 Fragment::Literal { data, .. } => data,
             };
-            write_buffer.bytes.extend(data);
+            write_buffer.extend(data);
         }
 
         CurrentResponse {
@@ -109,13 +125,18 @@ impl<C: Encoder> QueuedResponse<C> {
 }
 
 /// A response that is currently being sent.
-struct CurrentResponse<C: Encoder> {
+struct CurrentResponse {
     handle: Option<ServerFlowResponseHandle>,
-    response: C::Message<'static>,
+    response: ResponseMessage,
 }
 
 /// A response was sent.
-pub struct SendResponseEvent<C: Encoder> {
-    pub handle: Option<ServerFlowResponseHandle>,
-    pub response: C::Message<'static>,
+pub enum SendResponseEvent {
+    Greeting {
+        greeting: Greeting<'static>,
+    },
+    Response {
+        handle: Option<ServerFlowResponseHandle>,
+        response: Response<'static>,
+    },
 }

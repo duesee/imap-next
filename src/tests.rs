@@ -9,7 +9,7 @@ use tokio::net::{TcpListener, TcpStream};
 use crate::{
     client::{ClientFlow, ClientFlowEvent, ClientFlowOptions},
     server::{ServerFlow, ServerFlowEvent, ServerFlowOptions},
-    stream::AnyStream,
+    stream::Stream,
 };
 
 #[tokio::test]
@@ -25,17 +25,11 @@ async fn self_test() {
 
         async move {
             let (stream, _) = listener.accept().await.unwrap();
-
-            let (mut server, _) = ServerFlow::send_greeting(
-                AnyStream::new(stream),
-                ServerFlowOptions::default(),
-                greeting.clone(),
-            )
-            .await
-            .unwrap();
+            let mut stream = Stream::insecure(stream);
+            let mut server = ServerFlow::new(ServerFlowOptions::default(), greeting.clone());
 
             loop {
-                match server.progress().await.unwrap() {
+                match stream.progress(&mut server).await.unwrap() {
                     ServerFlowEvent::CommandReceived { command } => {
                         let no = Status::no(Some(command.tag), None, "...").unwrap();
                         server.enqueue_status(no);
@@ -55,19 +49,19 @@ async fn self_test() {
     #[allow(clippy::let_underscore_future)]
     let _ = tokio::task::spawn(server);
 
-    let (mut client, received_greeting) = {
-        let stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-        ClientFlow::receive_greeting(AnyStream::new(stream), ClientFlowOptions::default())
-            .await
-            .unwrap()
-    };
-
-    assert_eq!(greeting, received_greeting);
+    let stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let mut stream = Stream::insecure(stream);
+    let mut client = ClientFlow::new(ClientFlowOptions::default());
 
     client.enqueue_command(Command::new(Tag::unvalidated("A1"), CommandBody::Capability).unwrap());
 
     loop {
-        match client.progress().await.unwrap() {
+        match stream.progress(&mut client).await.unwrap() {
+            ClientFlowEvent::GreetingReceived {
+                greeting: received_greeting,
+            } => {
+                assert_eq!(greeting, received_greeting)
+            }
             ClientFlowEvent::StatusReceived { .. } => {
                 client.enqueue_command(
                     Command::new(

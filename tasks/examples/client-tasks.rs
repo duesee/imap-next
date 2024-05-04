@@ -1,6 +1,6 @@
 use imap_flow::{
     client::{ClientFlow, ClientFlowOptions},
-    stream::AnyStream,
+    stream::Stream,
 };
 use imap_types::response::{Response, Status};
 use tasks::{
@@ -11,22 +11,15 @@ use tokio::net::TcpStream;
 
 #[tokio::main]
 async fn main() {
-    let mut scheduler = {
-        let (flow, _) = {
-            let stream = TcpStream::connect("127.0.0.1:12345").await.unwrap();
-
-            ClientFlow::receive_greeting(AnyStream::new(stream), ClientFlowOptions::default())
-                .await
-                .unwrap()
-        };
-
-        Scheduler::new(flow)
-    };
+    let stream = TcpStream::connect("127.0.0.1:12345").await.unwrap();
+    let mut stream = Stream::insecure(stream);
+    let client = ClientFlow::new(ClientFlowOptions::default());
+    let mut scheduler = Scheduler::new(client);
 
     let handle1 = scheduler.enqueue_task(CapabilityTask::default());
 
     loop {
-        match scheduler.progress().await.unwrap() {
+        match stream.progress(&mut scheduler).await.unwrap() {
             SchedulerEvent::TaskFinished(mut token) => {
                 if let Some(capability) = handle1.resolve(&mut token) {
                     println!("handle1: {capability:?}");
@@ -47,7 +40,7 @@ async fn main() {
     let handle3 = scheduler.enqueue_task(LogoutTask::default());
 
     loop {
-        match scheduler.progress().await.unwrap() {
+        match stream.progress(&mut scheduler).await.unwrap() {
             SchedulerEvent::TaskFinished(mut token) => {
                 if let Some(auth) = handle2.resolve(&mut token) {
                     println!("handle2: {auth:?}");

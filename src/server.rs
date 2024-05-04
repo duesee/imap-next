@@ -1,9 +1,5 @@
-use std::{
-    fmt::{Debug, Formatter},
-    future::pending,
-};
+use std::fmt::{Debug, Formatter};
 
-use bytes::BytesMut;
 use imap_codec::{
     decode::{AuthenticateDataDecodeError, CommandDecodeError, IdleDoneDecodeError},
     AuthenticateDataCodec, CommandCodec, GreetingCodec, IdleDoneCodec, ResponseCodec,
@@ -20,10 +16,10 @@ use thiserror::Error;
 
 use crate::{
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
-    receive::{ReceiveEvent, ReceiveState},
+    receive::{ReceiveError, ReceiveEvent, ReceiveState},
     send_response::{SendResponseEvent, SendResponseState},
-    stream::{AnyStream, ReadBuffer, ReadError, WriteBuffer, WriteError},
     types::CommandAuthenticate,
+    Flow, FlowInterrupt,
 };
 
 static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ServerFlowResponseHandle> =
@@ -68,11 +64,10 @@ impl Default for ServerFlowOptions {
 }
 
 pub struct ServerFlow {
-    stream: AnyStream,
     options: ServerFlowOptions,
     handle_generator: HandleGenerator<ServerFlowResponseHandle>,
-    send_response_state: SendResponseState<ResponseCodec>,
-    receive_command_state: ServerReceiveState,
+    send_response_state: SendResponseState,
+    receive_state: ServerReceiveState,
 }
 
 impl Debug for ServerFlow {
@@ -84,46 +79,48 @@ impl Debug for ServerFlow {
     }
 }
 
-impl ServerFlow {
-    pub async fn send_greeting(
-        mut stream: AnyStream,
-        options: ServerFlowOptions,
-        greeting: Greeting<'static>,
-    ) -> Result<(Self, Greeting<'static>), ServerFlowError> {
-        // Send greeting
-        let write_buffer = WriteBuffer {
-            bytes: BytesMut::new(),
-        };
-        let mut send_greeting_state =
-            SendResponseState::new(GreetingCodec::default(), write_buffer);
-        send_greeting_state.enqueue(None, greeting);
-        let greeting = loop {
-            if let Some(SendResponseEvent { response, handle }) =
-                send_greeting_state.progress(&mut stream).await?
-            {
-                assert_eq!(handle, None);
-                break response;
-            }
-        };
+impl Flow for ServerFlow {
+    type Event = ServerFlowEvent;
+    type Error = ServerFlowError;
 
-        // Successfully sent greeting, construct instance
-        let write_buffer = send_greeting_state.finish();
-        let send_response_state = SendResponseState::new(ResponseCodec::default(), write_buffer);
-        let read_buffer = ReadBuffer {
-            bytes: BytesMut::new(),
-            limit: Some(options.max_command_size as usize),
-        };
-        let receive_command_state =
-            ReceiveState::new(CommandCodec::default(), options.crlf_relaxed, read_buffer);
-        let server_flow = Self {
-            stream,
+    fn enqueue_input(&mut self, bytes: &[u8]) {
+        self.enqueue_input(bytes)
+    }
+
+    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
+        self.progress()
+    }
+}
+
+impl ServerFlow {
+    pub fn new(options: ServerFlowOptions, greeting: Greeting<'static>) -> Self {
+        let mut send_response_state =
+            SendResponseState::new(GreetingCodec::default(), ResponseCodec::default());
+
+        send_response_state.enqueue_greeting(greeting);
+
+        let receive_state = ServerReceiveState::Command(ReceiveState::new(
+            CommandCodec::default(),
+            options.crlf_relaxed,
+            Some(options.max_command_size),
+        ));
+
+        Self {
             options,
             handle_generator: HANDLE_GENERATOR_GENERATOR.generate(),
             send_response_state,
-            receive_command_state: ServerReceiveState::Command(receive_command_state),
-        };
+            receive_state,
+        }
+    }
 
-        Ok((server_flow, greeting))
+    pub fn enqueue_input(&mut self, bytes: &[u8]) {
+        match &mut self.receive_state {
+            ServerReceiveState::Command(state) => state.enqueue_input(bytes),
+            ServerReceiveState::AuthenticateData(state) => state.enqueue_input(bytes),
+            ServerReceiveState::IdleAccept(state) => state.enqueue_input(bytes),
+            ServerReceiveState::IdleDone(state) => state.enqueue_input(bytes),
+            ServerReceiveState::Dummy => unreachable!(),
+        }
     }
 
     /// Enqueues the [`Data`] response for being sent to the client.
@@ -134,7 +131,7 @@ impl ServerFlow {
     pub fn enqueue_data(&mut self, data: Data<'static>) -> ServerFlowResponseHandle {
         let handle = self.handle_generator.generate();
         self.send_response_state
-            .enqueue(Some(handle), Response::Data(data));
+            .enqueue_response(Some(handle), Response::Data(data));
         handle
     }
 
@@ -146,7 +143,7 @@ impl ServerFlow {
     pub fn enqueue_status(&mut self, status: Status<'static>) -> ServerFlowResponseHandle {
         let handle = self.handle_generator.generate();
         self.send_response_state
-            .enqueue(Some(handle), Response::Status(status));
+            .enqueue_response(Some(handle), Response::Status(status));
         handle
     }
 
@@ -160,68 +157,57 @@ impl ServerFlow {
         continuation_request: CommandContinuationRequest<'static>,
     ) -> ServerFlowResponseHandle {
         let handle = self.handle_generator.generate();
-        self.send_response_state.enqueue(
+        self.send_response_state.enqueue_response(
             Some(handle),
             Response::CommandContinuationRequest(continuation_request),
         );
         handle
     }
 
-    pub async fn progress(&mut self) -> Result<ServerFlowEvent, ServerFlowError> {
-        // The server must do two things:
-        // - Sending responses to the client.
-        // - Receiving commands from the client.
-        //
-        // There are two ways to accomplish that:
-        // - Doing both in parallel.
-        // - Doing both consecutively.
-        //
-        // Doing both in parallel is more complicated because both operations share the same
-        // state and the borrow checker prevents the naive approach. We would need to introduce
-        // interior mutability.
-        //
-        // Doing both consecutively is easier. But in which order? Receiving commands will block
-        // indefinitely because we never know when the client is sending the next response.
-        // Sending responses will be completed in the foreseeable future because for practical
-        // purposes we can assume that the number of responses is finite and the stream will be
-        // able to transfer all bytes soon.
-        //
-        // Therefore we prefer the second approach and begin with sending the responses.
+    pub fn progress(&mut self) -> Result<ServerFlowEvent, FlowInterrupt<ServerFlowError>> {
         loop {
-            if let Some(event) = self.progress_send().await? {
+            if let Some(event) = self.progress_send()? {
                 return Ok(event);
             }
 
-            if let Some(event) = self.progress_receive().await? {
+            if let Some(event) = self.progress_receive()? {
                 return Ok(event);
             }
         }
     }
 
-    async fn progress_send(&mut self) -> Result<Option<ServerFlowEvent>, ServerFlowError> {
-        match self.send_response_state.progress(&mut self.stream).await? {
-            Some(SendResponseEvent {
+    fn progress_send(&mut self) -> Result<Option<ServerFlowEvent>, FlowInterrupt<ServerFlowError>> {
+        match self.send_response_state.progress() {
+            Ok(Some(SendResponseEvent::Greeting { greeting })) => {
+                // The initial greeting was sucessfully sent, inform the caller
+                Ok(Some(ServerFlowEvent::GreetingSent { greeting }))
+            }
+            Ok(Some(SendResponseEvent::Response {
                 handle: Some(handle),
                 response,
-            }) => {
+            })) => {
                 // A response was sucessfully sent, inform the caller
                 Ok(Some(ServerFlowEvent::ResponseSent { handle, response }))
             }
-            Some(SendResponseEvent { handle: None, .. }) => {
+            Ok(Some(SendResponseEvent::Response { handle: None, .. })) => {
                 // An internally created response was sent, don't inform the caller
                 Ok(None)
             }
-            _ => {
+            Ok(_) => {
                 // No progress yet
                 Ok(None)
             }
+            Err(FlowInterrupt::Io(io)) => Err(FlowInterrupt::Io(io)),
+            Err(FlowInterrupt::Error(_)) => unreachable!(),
         }
     }
 
-    async fn progress_receive(&mut self) -> Result<Option<ServerFlowEvent>, ServerFlowError> {
-        match &mut self.receive_command_state {
+    fn progress_receive(
+        &mut self,
+    ) -> Result<Option<ServerFlowEvent>, FlowInterrupt<ServerFlowError>> {
+        match &mut self.receive_state {
             ServerReceiveState::Command(state) => {
-                match state.progress(&mut self.stream).await {
+                match state.progress() {
                     Ok(ReceiveEvent::DecodingSuccess(command)) => {
                         state.finish_message();
 
@@ -230,7 +216,7 @@ impl ServerFlow {
                                 mechanism,
                                 initial_response,
                             } => {
-                                self.receive_command_state
+                                self.receive_state
                                     .change_state(NextExpectedMessage::AuthenticateData);
 
                                 Ok(Some(ServerFlowEvent::CommandAuthenticateReceived {
@@ -242,7 +228,7 @@ impl ServerFlow {
                                 }))
                             }
                             CommandBody::Idle => {
-                                self.receive_command_state
+                                self.receive_state
                                     .change_state(NextExpectedMessage::IdleAccept);
 
                                 Ok(Some(ServerFlowEvent::IdleCommandReceived {
@@ -257,11 +243,10 @@ impl ServerFlow {
                             })),
                         }
                     }
-                    Ok(ReceiveEvent::DecodingFailure(CommandDecodeError::LiteralFound {
-                        tag,
-                        length,
-                        mode,
-                    })) => {
+                    Err(FlowInterrupt::Io(io)) => Err(FlowInterrupt::Io(io)),
+                    Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
+                        CommandDecodeError::LiteralFound { tag, length, mode },
+                    ))) => {
                         if length > self.options.max_literal_size {
                             match mode {
                                 LiteralMode::Sync => {
@@ -275,11 +260,13 @@ impl ServerFlow {
                                     )
                                     .unwrap();
                                     self.send_response_state
-                                        .enqueue(None, Response::Status(status));
+                                        .enqueue_response(None, Response::Status(status));
 
-                                    let discarded_bytes = state.discard_message().into();
+                                    let discarded_bytes = state.discard_message();
 
-                                    Err(ServerFlowError::LiteralTooLong { discarded_bytes })
+                                    Err(FlowInterrupt::Error(ServerFlowError::LiteralTooLong {
+                                        discarded_bytes: Secret::new(discarded_bytes),
+                                    }))
                                 }
                                 LiteralMode::NonSync => {
                                     // TODO: We can't (reliably) make the client stop sending data.
@@ -290,9 +277,11 @@ impl ServerFlow {
                                     //       * ...
                                     //
                                     //       The LITERAL+ RFC has some recommendations.
-                                    let discarded_bytes = state.discard_message().into();
+                                    let discarded_bytes = state.discard_message();
 
-                                    Err(ServerFlowError::LiteralTooLong { discarded_bytes })
+                                    Err(FlowInterrupt::Error(ServerFlowError::LiteralTooLong {
+                                        discarded_bytes: Secret::new(discarded_bytes),
+                                    }))
                                 }
                             }
                         } else {
@@ -308,8 +297,10 @@ impl ServerFlow {
                                         self.options.literal_accept_text.clone(),
                                     )
                                     .unwrap();
-                                    self.send_response_state
-                                        .enqueue(None, Response::CommandContinuationRequest(cont));
+                                    self.send_response_state.enqueue_response(
+                                        None,
+                                        Response::CommandContinuationRequest(cont),
+                                    );
                                 }
                                 LiteralMode::NonSync => {
                                     // We don't need to inform the client because non-sync literals
@@ -320,81 +311,92 @@ impl ServerFlow {
                             Ok(None)
                         }
                     }
-                    Ok(ReceiveEvent::DecodingFailure(
+                    Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
                         CommandDecodeError::Failed | CommandDecodeError::Incomplete,
-                    )) => {
-                        let discarded_bytes = state.discard_message().into();
-                        Err(ServerFlowError::MalformedMessage { discarded_bytes })
-                    }
-                    Ok(ReceiveEvent::ExpectedCrlfGotLf) => {
-                        let discarded_bytes = state.discard_message().into();
-                        Err(ServerFlowError::ExpectedCrlfGotLf { discarded_bytes })
-                    }
-                    Err(ReadError::Closed) => Err(ServerFlowError::StreamClosed),
-                    Err(ReadError::Io(err)) => Err(ServerFlowError::Io(err)),
-                    Err(ReadError::BufferLimitReached) => {
-                        let discarded_bytes = state.discard_all_bytes().into();
-                        Err(ServerFlowError::CommandTooLong { discarded_bytes })
-                    }
-                }
-            }
-            ServerReceiveState::AuthenticateData(state) => {
-                match state.progress(&mut self.stream).await {
-                    Ok(ReceiveEvent::DecodingSuccess(authenticate_data)) => {
-                        state.finish_message();
-                        Ok(Some(ServerFlowEvent::AuthenticateDataReceived {
-                            authenticate_data,
+                    ))) => {
+                        let discarded_bytes = state.discard_message();
+                        Err(FlowInterrupt::Error(ServerFlowError::MalformedMessage {
+                            discarded_bytes: Secret::new(discarded_bytes),
                         }))
                     }
-                    Ok(ReceiveEvent::DecodingFailure(
-                        AuthenticateDataDecodeError::Failed
-                        | AuthenticateDataDecodeError::Incomplete,
-                    )) => {
-                        let discarded_bytes = state.discard_message().into();
-                        Err(ServerFlowError::MalformedMessage { discarded_bytes })
+                    Err(FlowInterrupt::Error(ReceiveError::ExpectedCrlfGotLf)) => {
+                        let discarded_bytes = state.discard_message();
+                        Err(FlowInterrupt::Error(ServerFlowError::ExpectedCrlfGotLf {
+                            discarded_bytes: Secret::new(discarded_bytes),
+                        }))
                     }
-                    Ok(ReceiveEvent::ExpectedCrlfGotLf) => {
-                        let discarded_bytes = state.discard_message().into();
-                        Err(ServerFlowError::ExpectedCrlfGotLf { discarded_bytes })
-                    }
-                    Err(ReadError::Closed) => Err(ServerFlowError::StreamClosed),
-                    Err(ReadError::Io(err)) => Err(ServerFlowError::Io(err)),
-                    Err(ReadError::BufferLimitReached) => {
-                        let discarded_bytes = state.discard_all_bytes().into();
-                        Err(ServerFlowError::CommandTooLong { discarded_bytes })
+                    Err(FlowInterrupt::Error(ReceiveError::MessageTooLong)) => {
+                        let discarded_bytes = state.discard_message();
+                        Err(FlowInterrupt::Error(ServerFlowError::CommandTooLong {
+                            discarded_bytes: Secret::new(discarded_bytes),
+                        }))
                     }
                 }
             }
+            ServerReceiveState::AuthenticateData(state) => match state.progress() {
+                Ok(ReceiveEvent::DecodingSuccess(authenticate_data)) => {
+                    state.finish_message();
+                    Ok(Some(ServerFlowEvent::AuthenticateDataReceived {
+                        authenticate_data,
+                    }))
+                }
+                Err(FlowInterrupt::Io(io)) => Err(FlowInterrupt::Io(io)),
+                Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
+                    AuthenticateDataDecodeError::Failed | AuthenticateDataDecodeError::Incomplete,
+                ))) => {
+                    let discarded_bytes = state.discard_message();
+                    Err(FlowInterrupt::Error(ServerFlowError::MalformedMessage {
+                        discarded_bytes: Secret::new(discarded_bytes),
+                    }))
+                }
+                Err(FlowInterrupt::Error(ReceiveError::ExpectedCrlfGotLf)) => {
+                    let discarded_bytes = state.discard_message();
+                    Err(FlowInterrupt::Error(ServerFlowError::ExpectedCrlfGotLf {
+                        discarded_bytes: Secret::new(discarded_bytes),
+                    }))
+                }
+                Err(FlowInterrupt::Error(ReceiveError::MessageTooLong)) => {
+                    let discarded_bytes = state.discard_message();
+                    Err(FlowInterrupt::Error(ServerFlowError::CommandTooLong {
+                        discarded_bytes: Secret::new(discarded_bytes),
+                    }))
+                }
+            },
             ServerReceiveState::IdleAccept(_) => {
-                // We block infinitely because we don't expect any message here.
-                // Instead the server flow user should drop this future and call
+                // We don't expect any message until the server flow user calls
                 // `idle_accept` or `idle_reject`.
-                pending().await
+                // TODO: It's strange to return NeedMoreInput here, but it works for now.
+                Err(FlowInterrupt::Io(crate::FlowIo::NeedMoreInput))
             }
-            ServerReceiveState::IdleDone(state) => match state.progress(&mut self.stream).await {
+            ServerReceiveState::IdleDone(state) => match state.progress() {
                 Ok(ReceiveEvent::DecodingSuccess(IdleDone)) => {
                     state.finish_message();
 
-                    self.receive_command_state
+                    self.receive_state
                         .change_state(NextExpectedMessage::Command);
 
                     Ok(Some(ServerFlowEvent::IdleDoneReceived))
                 }
-                Ok(ReceiveEvent::DecodingFailure(
+                Err(FlowInterrupt::Io(io)) => Err(FlowInterrupt::Io(io)),
+                Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
                     IdleDoneDecodeError::Failed | IdleDoneDecodeError::Incomplete,
-                )) => {
-                    let discarded_bytes = state.discard_message().into();
-                    Err(ServerFlowError::MalformedMessage { discarded_bytes })
+                ))) => {
+                    let discarded_bytes = state.discard_message();
+                    Err(FlowInterrupt::Error(ServerFlowError::MalformedMessage {
+                        discarded_bytes: Secret::new(discarded_bytes),
+                    }))
                 }
-                Ok(ReceiveEvent::ExpectedCrlfGotLf) => {
-                    let discarded_bytes = state.discard_message().into();
-                    Err(ServerFlowError::ExpectedCrlfGotLf { discarded_bytes })
+                Err(FlowInterrupt::Error(ReceiveError::ExpectedCrlfGotLf)) => {
+                    let discarded_bytes = state.discard_message();
+                    Err(FlowInterrupt::Error(ServerFlowError::ExpectedCrlfGotLf {
+                        discarded_bytes: Secret::new(discarded_bytes),
+                    }))
                 }
-                Err(ReadError::Closed) => Err(ServerFlowError::StreamClosed),
-                Err(ReadError::Io(err)) => Err(ServerFlowError::Io(err)),
-                Err(ReadError::BufferLimitReached) => {
-                    let discarded_bytes = state.discard_all_bytes().into();
-                    Err(ServerFlowError::CommandTooLong { discarded_bytes })
+                Err(FlowInterrupt::Error(ReceiveError::MessageTooLong)) => {
+                    let discarded_bytes = state.discard_message();
+                    Err(FlowInterrupt::Error(ServerFlowError::CommandTooLong {
+                        discarded_bytes: Secret::new(discarded_bytes),
+                    }))
                 }
             },
             ServerReceiveState::Dummy => {
@@ -407,7 +409,7 @@ impl ServerFlow {
         &mut self,
         continuation_request: CommandContinuationRequest<'static>,
     ) -> Result<ServerFlowResponseHandle, CommandContinuationRequest<'static>> {
-        if let ServerReceiveState::AuthenticateData { .. } = self.receive_command_state {
+        if let ServerReceiveState::AuthenticateData { .. } = self.receive_state {
             let handle = self.enqueue_continuation_request(continuation_request);
             Ok(handle)
         } else {
@@ -419,10 +421,10 @@ impl ServerFlow {
         &mut self,
         status: Status<'static>,
     ) -> Result<ServerFlowResponseHandle, Status<'static>> {
-        if let ServerReceiveState::AuthenticateData(_) = &mut self.receive_command_state {
+        if let ServerReceiveState::AuthenticateData(_) = &mut self.receive_state {
             let handle = self.enqueue_status(status);
 
-            self.receive_command_state
+            self.receive_state
                 .change_state(NextExpectedMessage::Command);
 
             Ok(handle)
@@ -435,10 +437,10 @@ impl ServerFlow {
         &mut self,
         continuation_request: CommandContinuationRequest<'static>,
     ) -> Result<ServerFlowResponseHandle, CommandContinuationRequest<'static>> {
-        if let ServerReceiveState::IdleAccept(_) = &mut self.receive_command_state {
+        if let ServerReceiveState::IdleAccept(_) = &mut self.receive_state {
             let handle = self.enqueue_continuation_request(continuation_request);
 
-            self.receive_command_state
+            self.receive_state
                 .change_state(NextExpectedMessage::IdleDone);
 
             Ok(handle)
@@ -451,25 +453,16 @@ impl ServerFlow {
         &mut self,
         status: Status<'static>,
     ) -> Result<ServerFlowResponseHandle, Status<'static>> {
-        if let ServerReceiveState::IdleAccept(_) = &mut self.receive_command_state {
+        if let ServerReceiveState::IdleAccept(_) = &mut self.receive_state {
             let handle = self.enqueue_status(status);
 
-            self.receive_command_state
+            self.receive_state
                 .change_state(NextExpectedMessage::Command);
 
             Ok(handle)
         } else {
             Err(status)
         }
-    }
-
-    #[cfg(feature = "expose_stream")]
-    /// Return the underlying stream for debug purposes (or experiments).
-    ///
-    /// Note: Writing to or reading from the stream may introduce
-    /// conflicts with imap-flow.
-    pub fn stream_mut(&mut self) -> &mut AnyStream {
-        &mut self.stream
     }
 }
 
@@ -522,7 +515,7 @@ impl ServerReceiveState {
                     Self::AuthenticateData(state) => state.change_codec(codec),
                     Self::IdleAccept(state) => state,
                     Self::IdleDone(state) => state.change_codec(codec),
-                    Self::Dummy => todo!(),
+                    Self::Dummy => unreachable!(),
                 })
             }
             NextExpectedMessage::IdleDone => {
@@ -532,7 +525,7 @@ impl ServerReceiveState {
                     Self::AuthenticateData(state) => state.change_codec(codec),
                     Self::IdleAccept(state) => state.change_codec(codec),
                     Self::IdleDone(state) => state,
-                    Self::Dummy => todo!(),
+                    Self::Dummy => unreachable!(),
                 })
             }
         };
@@ -567,6 +560,10 @@ impl Debug for ServerFlowResponseHandle {
 
 #[derive(Debug)]
 pub enum ServerFlowEvent {
+    /// Initial [`Greeting] was sent successfully.
+    GreetingSent {
+        greeting: Greeting<'static>,
+    },
     /// Enqueued [`Response`] was sent successfully.
     ResponseSent {
         /// Handle of the formerly enqueued [`Response`].
@@ -608,10 +605,6 @@ pub enum ServerFlowEvent {
 
 #[derive(Debug, Error)]
 pub enum ServerFlowError {
-    #[error("Stream was closed")]
-    StreamClosed,
-    #[error(transparent)]
-    Io(#[from] tokio::io::Error),
     #[error("Expected `\\r\\n`, got `\\n`")]
     ExpectedCrlfGotLf { discarded_bytes: Secret<Box<[u8]>> },
     #[error("Received malformed message")]
@@ -620,15 +613,6 @@ pub enum ServerFlowError {
     LiteralTooLong { discarded_bytes: Secret<Box<[u8]>> },
     #[error("Command was rejected because it was too long")]
     CommandTooLong { discarded_bytes: Secret<Box<[u8]>> },
-}
-
-impl From<WriteError> for ServerFlowError {
-    fn from(err: WriteError) -> Self {
-        match err {
-            WriteError::Closed => Self::StreamClosed,
-            WriteError::Io(err) => Self::Io(err),
-        }
-    }
 }
 
 /// A dummy codec we use for technical reasons when we don't want to receive anything at all.

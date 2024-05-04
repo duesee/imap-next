@@ -2,7 +2,7 @@ use std::io::BufRead;
 
 use imap_flow::{
     client::{ClientFlow, ClientFlowEvent, ClientFlowOptions},
-    stream::AnyStream,
+    stream::Stream,
 };
 use imap_types::{
     command::{Command, CommandBody},
@@ -14,11 +14,15 @@ use tokio::{net::TcpStream, sync::mpsc::Receiver};
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let stream = TcpStream::connect("127.0.0.1:12345").await.unwrap();
+    let mut stream = Stream::insecure(stream);
+    let mut client = ClientFlow::new(ClientFlowOptions::default());
 
-    let (mut client, _) =
-        ClientFlow::receive_greeting(AnyStream::new(stream), ClientFlowOptions::default())
-            .await
-            .unwrap();
+    loop {
+        match stream.progress(&mut client).await.unwrap() {
+            ClientFlowEvent::GreetingReceived { .. } => break,
+            event => println!("unexpected event: {event:?}"),
+        }
+    }
 
     println!("Press ENTER to stop IDLE");
     let mut lines = Lines::new();
@@ -31,7 +35,7 @@ async fn main() {
 
     loop {
         tokio::select! {
-            event = client.progress() => {
+            event = stream.progress(&mut client) => {
                 match event.unwrap() {
                     ClientFlowEvent::IdleCommandSent { .. } => {
                         println!("IDLE command sent")
@@ -69,7 +73,7 @@ async fn main() {
     }
 
     loop {
-        match client.progress().await.unwrap() {
+        match stream.progress(&mut client).await.unwrap() {
             ref event @ ClientFlowEvent::StatusReceived {
                 status:
                     Status::Tagged(Tagged {

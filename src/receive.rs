@@ -1,12 +1,13 @@
 use bounded_static::IntoBoundedStatic;
-use bytes::Buf;
+use bytes::{Buf, BytesMut};
 use imap_codec::decode::Decoder;
 
-use crate::stream::{AnyStream, ReadBuffer, ReadError};
+use crate::{FlowInterrupt, FlowIo};
 
 pub struct ReceiveState<C> {
     codec: C,
     crlf_relaxed: bool,
+    max_message_size: Option<u32>,
     next_fragment: NextFragment,
     // How many bytes in the parse buffer do we already have checked?
     // This is important if we need multiple attempts to read from the underlying
@@ -14,87 +15,101 @@ pub struct ReceiveState<C> {
     seen_bytes: usize,
     // Used for reading the current message from the stream.
     // Its length should always be equal to or greater than `seen_bytes`.
-    read_buffer: ReadBuffer,
+    read_buffer: BytesMut,
 }
 
 impl<C> ReceiveState<C> {
-    pub fn new(codec: C, crlf_relaxed: bool, read_buffer: ReadBuffer) -> Self {
+    pub fn new(codec: C, crlf_relaxed: bool, max_message_size: Option<u32>) -> Self {
+        Self::with_read_buffer(codec, crlf_relaxed, max_message_size, BytesMut::default())
+    }
+
+    fn with_read_buffer(
+        codec: C,
+        crlf_relaxed: bool,
+        max_message_size: Option<u32>,
+        read_buffer: BytesMut,
+    ) -> Self {
         Self {
             codec,
             crlf_relaxed,
+            max_message_size,
             next_fragment: NextFragment::start_new_line(),
             seen_bytes: 0,
             read_buffer,
         }
     }
 
+    pub fn enqueue_input(&mut self, bytes: &[u8]) {
+        self.read_buffer.extend(bytes);
+    }
+
     pub fn start_literal(&mut self, length: u32) {
         self.next_fragment = NextFragment::Literal { length };
-        self.read_buffer.bytes.reserve(length as usize);
+        self.read_buffer.reserve(length as usize);
     }
 
     pub fn finish_message(&mut self) {
-        self.read_buffer.bytes.advance(self.seen_bytes);
+        self.read_buffer.advance(self.seen_bytes);
         self.seen_bytes = 0;
         self.next_fragment = NextFragment::start_new_line();
     }
 
     pub fn discard_message(&mut self) -> Box<[u8]> {
-        let discarded_bytes = self.read_buffer.bytes[..self.seen_bytes].into();
+        let discarded_bytes = self.read_buffer[..self.seen_bytes].into();
         self.finish_message();
         discarded_bytes
     }
 
-    pub fn discard_all_bytes(&mut self) -> Box<[u8]> {
-        self.seen_bytes = self.read_buffer.bytes.len();
-        self.discard_message()
-    }
-
-    pub async fn progress(&mut self, stream: &mut AnyStream) -> Result<ReceiveEvent<C>, ReadError>
+    pub fn progress(&mut self) -> Result<ReceiveEvent<C>, FlowInterrupt<ReceiveError<C>>>
     where
         C: Decoder,
         for<'a> C::Message<'a>: IntoBoundedStatic<Static = C::Message<'static>>,
         for<'a> C::Error<'a>: IntoBoundedStatic<Static = C::Error<'static>>,
     {
-        loop {
+        let event = loop {
             match self.next_fragment {
                 NextFragment::Line { seen_bytes_in_line } => {
-                    if let Some(event) = self.progress_line(stream, seen_bytes_in_line).await? {
-                        return Ok(event);
-                    }
+                    break self.progress_line(seen_bytes_in_line)?;
                 }
                 NextFragment::Literal { length } => {
-                    self.progress_literal(stream, length).await?;
+                    self.progress_literal(length)?;
                 }
             };
-        }
+        };
+
+        Ok(event)
     }
 
-    async fn progress_line(
+    fn progress_line(
         &mut self,
-        stream: &mut AnyStream,
         seen_bytes_in_line: usize,
-    ) -> Result<Option<ReceiveEvent<C>>, ReadError>
+    ) -> Result<ReceiveEvent<C>, FlowInterrupt<ReceiveError<C>>>
     where
         C: Decoder,
         for<'a> C::Message<'a>: IntoBoundedStatic<Static = C::Message<'static>>,
         for<'a> C::Error<'a>: IntoBoundedStatic<Static = C::Error<'static>>,
     {
+        let max_readable_bytes = self.max_readable_bytes();
+
         let Some(crlf_result) = find_crlf(
-            &self.read_buffer.bytes[self.seen_bytes..],
+            &self.read_buffer[self.seen_bytes..max_readable_bytes],
             seen_bytes_in_line,
             self.crlf_relaxed,
         ) else {
             // No full line received yet, more data needed.
 
             // Mark the bytes of the partial line as seen.
-            let seen_bytes_in_line = self.read_buffer.bytes.len() - self.seen_bytes;
+            let seen_bytes_in_line = self.read_buffer.len() - self.seen_bytes;
             self.next_fragment = NextFragment::Line { seen_bytes_in_line };
 
-            // Read more data.
-            stream.read(&mut self.read_buffer).await?;
+            // Abort if we can't request more data.
+            if Some(max_readable_bytes) == self.max_message_size.map(|size| size as usize) {
+                self.seen_bytes = max_readable_bytes;
+                return Err(FlowInterrupt::Error(ReceiveError::MessageTooLong));
+            }
 
-            return Ok(None);
+            // Request more data.
+            return Err(FlowInterrupt::Io(FlowIo::NeedMoreInput));
         };
 
         // Mark the all bytes of the current line as seen.
@@ -102,35 +117,45 @@ impl<C> ReceiveState<C> {
         self.next_fragment = NextFragment::start_new_line();
 
         if crlf_result.expected_crlf_got_lf {
-            return Ok(Some(ReceiveEvent::ExpectedCrlfGotLf));
+            return Err(FlowInterrupt::Error(ReceiveError::ExpectedCrlfGotLf));
         }
 
         // Try to parse the whole message from the start (including the new line).
         // TODO(#129): If the message is really long and we need multiple attempts to receive it,
         //             then this is O(n^2). IMO this can be only fixed by using a generator-like
         //             decoder.
-        match self
-            .codec
-            .decode(&self.read_buffer.bytes[..self.seen_bytes])
-        {
+        match self.codec.decode(&self.read_buffer[..self.seen_bytes]) {
             Ok((remaining, message)) => {
                 assert!(remaining.is_empty());
-                Ok(Some(ReceiveEvent::DecodingSuccess(message.into_static())))
+                Ok(ReceiveEvent::DecodingSuccess(message.into_static()))
             }
-            Err(error) => Ok(Some(ReceiveEvent::DecodingFailure(error.into_static()))),
+            Err(error) => Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
+                error.into_static(),
+            ))),
         }
     }
 
-    async fn progress_literal(
+    fn progress_literal(
         &mut self,
-        stream: &mut AnyStream,
         literal_length: u32,
-    ) -> Result<(), ReadError> {
-        let unseen_bytes = self.read_buffer.bytes.len() - self.seen_bytes;
+    ) -> Result<(), FlowInterrupt<ReceiveError<C>>>
+    where
+        C: Decoder,
+    {
+        let max_readable_bytes = self.max_readable_bytes();
+        let unseen_bytes = max_readable_bytes - self.seen_bytes;
 
         if unseen_bytes < literal_length as usize {
             // We did not receive enough bytes for the literal yet.
-            stream.read(&mut self.read_buffer).await?;
+
+            // Abort if we can't request more data.
+            if Some(max_readable_bytes) == self.max_message_size.map(|size| size as usize) {
+                self.seen_bytes = max_readable_bytes;
+                return Err(FlowInterrupt::Error(ReceiveError::MessageTooLong));
+            }
+
+            // Request more data.
+            return Err(FlowInterrupt::Io(FlowIo::NeedMoreInput));
         } else {
             // We received enough bytes for the literal.
             // Now we can continue reading the next line.
@@ -141,15 +166,30 @@ impl<C> ReceiveState<C> {
         Ok(())
     }
 
+    fn max_readable_bytes(&self) -> usize {
+        let readable_bytes = self.read_buffer.len();
+        self.max_message_size
+            .map_or(readable_bytes, |size| readable_bytes.min(size as usize))
+    }
+
     pub fn change_codec<D>(self, codec: D) -> ReceiveState<D> {
-        ReceiveState::new(codec, self.crlf_relaxed, self.read_buffer)
+        ReceiveState::with_read_buffer(
+            codec,
+            self.crlf_relaxed,
+            self.max_message_size,
+            self.read_buffer,
+        )
     }
 }
 
 pub enum ReceiveEvent<C: Decoder> {
     DecodingSuccess(C::Message<'static>),
+}
+
+pub enum ReceiveError<C: Decoder> {
     DecodingFailure(C::Error<'static>),
     ExpectedCrlfGotLf,
+    MessageTooLong,
 }
 
 /// The next fragment that will be read...

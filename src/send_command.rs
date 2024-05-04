@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, convert::Infallible};
 
 use imap_codec::{
     encode::{Encoder, Fragment},
@@ -13,11 +13,7 @@ use imap_types::{
 };
 use tracing::warn;
 
-use crate::{
-    client::ClientFlowCommandHandle,
-    stream::{AnyStream, WriteBuffer, WriteError},
-    types::CommandAuthenticate,
-};
+use crate::{client::ClientFlowCommandHandle, types::CommandAuthenticate, FlowInterrupt, FlowIo};
 
 pub struct SendCommandState {
     command_codec: CommandCodec,
@@ -27,11 +23,6 @@ pub struct SendCommandState {
     queued_commands: VecDeque<QueuedCommand>,
     /// The command that is currently being sent.
     current_command: Option<CurrentCommand>,
-    /// Used for writing the current command to the stream.
-    /// Note that this buffer can be non-empty even if `current_command` is `None`
-    /// because commands can be aborted (see `maybe_terminate`) but partially sent
-    /// fragment must never be aborted.
-    write_buffer: WriteBuffer,
 }
 
 impl SendCommandState {
@@ -39,7 +30,6 @@ impl SendCommandState {
         command_codec: CommandCodec,
         authenticate_data_codec: AuthenticateDataCodec,
         idle_done_codec: IdleDoneCodec,
-        write_buffer: WriteBuffer,
     ) -> Self {
         Self {
             command_codec,
@@ -47,7 +37,6 @@ impl SendCommandState {
             idle_done_codec,
             queued_commands: VecDeque::new(),
             current_command: None,
-            write_buffer,
         }
     }
 
@@ -281,15 +270,12 @@ impl SendCommandState {
         Some(handle)
     }
 
-    pub async fn progress(
-        &mut self,
-        stream: &mut AnyStream,
-    ) -> Result<Option<SendCommandEvent>, WriteError> {
+    pub fn progress(&mut self) -> Result<Option<SendCommandEvent>, FlowInterrupt<Infallible>> {
         let current_command = match self.current_command.take() {
             Some(current_command) => {
                 // We are currently sending a command but the sending process was aborted for one
                 // of these reasons:
-                // - The future was cancelled
+                // - The flow was interrupted
                 // - The server must send a continuation request or a status
                 // - The client flow user must provide more data
                 // Continue the sending process.
@@ -305,32 +291,34 @@ impl SendCommandState {
             }
         };
 
+        // Creates a buffer for writing the current command
+        let mut write_buffer = Vec::new();
+
         // Push as many bytes of the command as possible to the buffer
-        let current_command = current_command.push_to_buffer(&mut self.write_buffer);
+        let current_command = current_command.push_to_buffer(&mut write_buffer);
 
-        // Store the current command to ensure cancellation safety
-        self.current_command = Some(current_command);
-
-        // Send all bytes of current command
-        stream.write_all(&mut self.write_buffer).await?;
-
-        // Restore the current command, can't fail because we set it to `Some` above
-        let current_command = self.current_command.take().unwrap();
-
-        // Inform the state of the current command that all bytes were sent
-        match current_command.finish_sending() {
-            FinishSendingResult::Uncompleted {
-                state: current_command,
-                event,
-            } => {
-                // Command is not finished yet
-                self.current_command = Some(current_command);
-                Ok(event)
+        if write_buffer.is_empty() {
+            // Inform the state of the current command that all bytes are sent
+            match current_command.finish_sending() {
+                FinishSendingResult::Uncompleted {
+                    state: current_command,
+                    event,
+                } => {
+                    // Command is not finished yet
+                    self.current_command = Some(current_command);
+                    Ok(event)
+                }
+                FinishSendingResult::Completed { event } => {
+                    // Command was sent completely
+                    Ok(Some(event))
+                }
             }
-            FinishSendingResult::Completed { event } => {
-                // Command was sent completely
-                Ok(Some(event))
-            }
+        } else {
+            // Store the current command, we'll continue later
+            self.current_command = Some(current_command);
+
+            // Interrupt the flow for sendng all bytes of current command
+            Err(FlowInterrupt::Io(FlowIo::Output(write_buffer)))
         }
     }
 }
@@ -407,7 +395,7 @@ enum CurrentCommand {
 
 impl CurrentCommand {
     /// Pushes as many bytes as possible from the command to the buffer.
-    fn push_to_buffer(self, write_buffer: &mut WriteBuffer) -> Self {
+    fn push_to_buffer(self, write_buffer: &mut Vec<u8>) -> Self {
         match self {
             Self::Command(state) => Self::Command(state.push_to_buffer(write_buffer)),
             Self::Authenticate(state) => Self::Authenticate(state.push_to_buffer(write_buffer)),
@@ -462,13 +450,13 @@ struct CommandState {
 }
 
 impl CommandState {
-    fn push_to_buffer(self, write_buffer: &mut WriteBuffer) -> Self {
+    fn push_to_buffer(self, write_buffer: &mut Vec<u8>) -> Self {
         let mut fragments = self.fragments;
         let activity = match self.activity {
             CommandActivity::PushingFragments { accepted_literal } => {
                 // First push the accepted literal if available
                 if let Some(data) = accepted_literal {
-                    write_buffer.bytes.extend(data);
+                    write_buffer.extend(data);
                 }
 
                 // Push as many fragments as possible
@@ -481,7 +469,7 @@ impl CommandState {
                                 mode: LiteralMode::NonSync,
                             },
                         ) => {
-                            write_buffer.bytes.extend(data);
+                            write_buffer.extend(data);
                         }
                         Some(Fragment::Literal {
                             data,
@@ -559,14 +547,14 @@ struct AuthenticateState {
 }
 
 impl AuthenticateState {
-    fn push_to_buffer(self, write_buffer: &mut WriteBuffer) -> Self {
+    fn push_to_buffer(self, write_buffer: &mut Vec<u8>) -> Self {
         let activity = match self.activity {
             AuthenticateActivity::PushingAuthenticate { authenticate } => {
-                write_buffer.bytes.extend(authenticate);
+                write_buffer.extend(authenticate);
                 AuthenticateActivity::WaitingForAuthenticateSent
             }
             AuthenticateActivity::PushingAuthenticateData { authenticate_data } => {
-                write_buffer.bytes.extend(authenticate_data);
+                write_buffer.extend(authenticate_data);
                 AuthenticateActivity::WaitingForAuthenticateDataSent
             }
             activity => activity,
@@ -628,14 +616,14 @@ struct IdleState {
 }
 
 impl IdleState {
-    fn push_to_buffer(self, write_buffer: &mut WriteBuffer) -> Self {
+    fn push_to_buffer(self, write_buffer: &mut Vec<u8>) -> Self {
         let activity = match self.activity {
             IdleActivity::PushingIdle { idle } => {
-                write_buffer.bytes.extend(idle);
+                write_buffer.extend(idle);
                 IdleActivity::WaitingForIdleSent
             }
             IdleActivity::PushingIdleDone { idle_done } => {
-                write_buffer.bytes.extend(idle_done);
+                write_buffer.extend(idle_done);
                 IdleActivity::WaitingForIdleDoneSent
             }
             activity => activity,

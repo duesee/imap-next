@@ -4,7 +4,7 @@ use colored::Colorize;
 use imap_flow::{
     client::{ClientFlow, ClientFlowError, ClientFlowEvent, ClientFlowOptions},
     server::{ServerFlow, ServerFlowError, ServerFlowEvent, ServerFlowOptions},
-    stream::AnyStream,
+    stream::{Stream, StreamError},
 };
 use imap_types::{
     bounded_static::ToBoundedStatic,
@@ -13,12 +13,10 @@ use imap_types::{
     extensions::idle::IdleDone,
     response::{Code, Status},
 };
+use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerName};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_rustls::{
-    rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerName},
-    TlsAcceptor, TlsConnector,
-};
+use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tracing::{error, info, trace};
 
 use crate::{
@@ -101,9 +99,9 @@ impl Proxy<BoundState> {
                 //             However, for testing purposes, it's nice to create it on-the-fly.
                 let acceptor = TlsAcceptor::from(Arc::new(config));
 
-                AnyStream::new(acceptor.accept(client_to_proxy).await?)
+                Stream::tls(acceptor.accept(client_to_proxy).await?.into())
             }
-            Bind::Insecure { .. } => AnyStream::new(client_to_proxy),
+            Bind::Insecure { .. } => Stream::insecure(client_to_proxy),
         };
 
         Ok(Proxy {
@@ -118,7 +116,7 @@ impl Proxy<BoundState> {
 
 pub struct ClientAcceptedState {
     client_addr: SocketAddr,
-    client_to_proxy: AnyStream,
+    client_to_proxy: Stream<ServerFlow>,
 }
 
 impl State for ClientAcceptedState {}
@@ -167,9 +165,9 @@ impl Proxy<ClientAcceptedState> {
                 let dnsname = ServerName::try_from(host.as_str()).unwrap();
 
                 info!(?server_addr_port, "Starting TLS with server");
-                AnyStream::new(connector.connect(dnsname, stream_to_server).await.unwrap())
+                Stream::tls(connector.connect(dnsname, stream_to_server).await?.into())
             }
-            Connect::Insecure { .. } => AnyStream::new(stream_to_server),
+            Connect::Insecure { .. } => Stream::insecure(stream_to_server),
         };
 
         info!(?server_addr_port, "Connected to server");
@@ -185,58 +183,54 @@ impl Proxy<ClientAcceptedState> {
 }
 
 pub struct ConnectedState {
-    client_to_proxy: AnyStream,
-    proxy_to_server: AnyStream,
+    client_to_proxy: Stream<ServerFlow>,
+    proxy_to_server: Stream<ClientFlow>,
 }
 
 impl State for ConnectedState {}
 
 impl Proxy<ConnectedState> {
     pub async fn start_conversation(self) {
-        let (mut proxy_to_server, mut greeting) = {
+        let mut proxy_to_server_flow = {
             // TODO(#144): Read options from config
             let options = ClientFlowOptions::default();
-
-            let result = ClientFlow::receive_greeting(self.state.proxy_to_server, options).await;
-
-            match result {
-                Ok(value) => value,
-                Err(error) => {
-                    error!(?error, "Failed to receive greeting");
-                    return;
-                }
+            ClientFlow::new(options)
+        };
+        let mut proxy_to_server_stream = self.state.proxy_to_server;
+        let mut greeting = match proxy_to_server_stream
+            .progress(&mut proxy_to_server_flow)
+            .await
+        {
+            Ok(ClientFlowEvent::GreetingReceived { greeting }) => greeting,
+            Ok(event) => {
+                error!(role = "s2p", ?event, "Unexpected event");
+                return;
+            }
+            Err(error) => {
+                error!(role = "s2p", ?error, "Failed to receive greeting");
+                return;
             }
         };
         trace!(role = "s2p", greeting=%format!("{:?}", greeting).blue(), "<--|");
 
         util::filter_capabilities_in_greeting(&mut greeting);
 
-        let (mut client_to_proxy, _) = {
+        let mut client_to_proxy_flow = {
             // TODO(#144): Read options from config
             let mut options = ServerFlowOptions::default();
             options.literal_accept_text = Text::try_from(LITERAL_ACCEPT_TEXT).unwrap();
             options.literal_reject_text = Text::try_from(LITERAL_REJECT_TEXT).unwrap();
-
-            let result =
-                ServerFlow::send_greeting(self.state.client_to_proxy, options, greeting).await;
-
-            match result {
-                Ok(value) => value,
-                Err(error) => {
-                    error!(?error, "Failed to forward greeting");
-                    return;
-                }
-            }
+            ServerFlow::new(options, greeting)
         };
-        trace!(role = "p2c", "<--- greeting");
+        let mut client_to_proxy_stream = self.state.client_to_proxy;
 
         loop {
             let control_flow = tokio::select! {
-                event = client_to_proxy.progress() => {
-                    handle_client_event(event, &mut proxy_to_server)
+                event = client_to_proxy_stream.progress(&mut client_to_proxy_flow) => {
+                    handle_client_event(event, &mut proxy_to_server_flow)
                 }
-                event = proxy_to_server.progress() => {
-                    handle_server_event(event, &mut client_to_proxy)
+                event = proxy_to_server_stream.progress(&mut proxy_to_server_flow) => {
+                    handle_server_event(event, &mut client_to_proxy_flow)
                 }
             };
 
@@ -248,12 +242,24 @@ impl Proxy<ConnectedState> {
 }
 
 fn handle_client_event(
-    error: Result<ServerFlowEvent, ServerFlowError>,
+    result: Result<ServerFlowEvent, StreamError<ServerFlowError>>,
     proxy_to_server: &mut ClientFlow,
 ) -> ControlFlow {
-    let event = match error {
+    let event = match result {
         Ok(event) => event,
-        Err(
+        Err(StreamError::Closed) => {
+            info!(role = "c2p", "Connection closed");
+            return ControlFlow::Abort;
+        }
+        Err(StreamError::Io(error)) => {
+            error!(role = "c2p", %error, "Connection terminated");
+            return ControlFlow::Abort;
+        }
+        Err(StreamError::Tls(error)) => {
+            error!(role = "c2p", %error, "Connection terminated");
+            return ControlFlow::Abort;
+        }
+        Err(StreamError::Flow(
             ref error @ (ServerFlowError::ExpectedCrlfGotLf {
                 ref discarded_bytes,
             }
@@ -266,21 +272,16 @@ fn handle_client_event(
             | ServerFlowError::CommandTooLong {
                 ref discarded_bytes,
             }),
-        ) => {
+        )) => {
             error!(role = "c2p", %error, ?discarded_bytes, "Discard client message");
             return ControlFlow::Continue;
-        }
-        Err(ServerFlowError::StreamClosed) => {
-            error!(role = "c2p", "Stream closed");
-            return ControlFlow::Abort;
-        }
-        Err(ServerFlowError::Io(error)) => {
-            error!(role = "c2p", %error, "IO error");
-            return ControlFlow::Abort;
         }
     };
 
     match event {
+        ServerFlowEvent::GreetingSent { .. } => {
+            trace!(role = "p2c", "<--- greeting");
+        }
         ServerFlowEvent::ResponseSent { handle, .. } => {
             trace!(role = "p2c", ?handle, "<---");
         }
@@ -332,33 +333,42 @@ fn handle_client_event(
 }
 
 fn handle_server_event(
-    event: Result<ClientFlowEvent, ClientFlowError>,
+    event: Result<ClientFlowEvent, StreamError<ClientFlowError>>,
     client_to_proxy: &mut ServerFlow,
 ) -> ControlFlow {
     let event = match event {
         Ok(event) => event,
-        Err(
+        Err(StreamError::Closed) => {
+            error!(role = "s2p", "Connection closed");
+            return ControlFlow::Abort;
+        }
+        Err(StreamError::Io(error)) => {
+            error!(role = "s2p", %error, "Connection terminated");
+            return ControlFlow::Abort;
+        }
+        Err(StreamError::Tls(error)) => {
+            error!(role = "s2p", %error, "Connection terminated");
+            return ControlFlow::Abort;
+        }
+        Err(StreamError::Flow(
             ref error @ (ClientFlowError::ExpectedCrlfGotLf {
                 ref discarded_bytes,
             }
             | ClientFlowError::MalformedMessage {
                 ref discarded_bytes,
             }),
-        ) => {
+        )) => {
             error!(role = "c2p", %error, ?discarded_bytes, "Discard server message");
             return ControlFlow::Continue;
-        }
-        Err(ClientFlowError::StreamClosed) => {
-            error!(role = "s2p", "Stream closed");
-            return ControlFlow::Abort;
-        }
-        Err(ClientFlowError::Io(error)) => {
-            error!(role = "s2p", %error, "IO error");
-            return ControlFlow::Abort;
         }
     };
 
     match event {
+        ClientFlowEvent::GreetingReceived { greeting } => {
+            // This event will only emitted at the beginning and we already handled it
+            // somewhere else
+            error!(role = "s2p", ?greeting, "Unexpected greeting");
+        }
         ClientFlowEvent::CommandSent { handle, .. } => {
             trace!(role = "p2s", ?handle, "--->");
         }
