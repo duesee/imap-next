@@ -1,6 +1,6 @@
 use imap_flow::{
     client::{ClientFlow, ClientFlowEvent, ClientFlowOptions},
-    stream::AnyStream,
+    stream::Stream,
 };
 use imap_types::{
     command::{Command, CommandBody},
@@ -11,11 +11,16 @@ use tokio::net::TcpStream;
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let stream = TcpStream::connect("127.0.0.1:12345").await.unwrap();
+    let mut stream = Stream::insecure(stream);
+    let mut client = ClientFlow::new(ClientFlowOptions::default());
 
-    let (mut client, greeting) =
-        ClientFlow::receive_greeting(AnyStream::new(stream), ClientFlowOptions::default())
-            .await
-            .unwrap();
+    let greeting = loop {
+        match stream.progress(&mut client).await.unwrap() {
+            ClientFlowEvent::GreetingReceived { greeting } => break greeting,
+            event => println!("unexpected event: {event:?}"),
+        }
+    };
+
     println!("received greeting: {greeting:?}");
 
     let handle = client.enqueue_command(Command {
@@ -24,7 +29,7 @@ async fn main() {
     });
 
     loop {
-        match client.progress().await.unwrap() {
+        match stream.progress(&mut client).await.unwrap() {
             ClientFlowEvent::CommandSent {
                 handle: got_handle,
                 command,

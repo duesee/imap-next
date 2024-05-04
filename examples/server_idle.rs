@@ -2,7 +2,7 @@ use std::{io::BufRead, num::NonZeroU32};
 
 use imap_flow::{
     server::{ServerFlow, ServerFlowEvent, ServerFlowOptions},
-    stream::AnyStream,
+    stream::Stream,
 };
 use imap_types::{
     core::Text,
@@ -14,21 +14,20 @@ use tokio::{net::TcpListener, sync::mpsc::Receiver};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let stream = {
-        let listener = TcpListener::bind("127.0.0.1:12345").await.unwrap();
-
-        let (stream, _) = listener.accept().await.unwrap();
-
-        stream
-    };
-
-    let (mut server, _) = ServerFlow::send_greeting(
-        AnyStream::new(stream),
+    let listener = TcpListener::bind("127.0.0.1:12345").await.unwrap();
+    let (stream, _) = listener.accept().await.unwrap();
+    let mut stream = Stream::insecure(stream);
+    let mut server = ServerFlow::new(
         ServerFlowOptions::default(),
-        Greeting::ok(None, "Hello, World!").unwrap(),
-    )
-    .await
-    .unwrap();
+        Greeting::ok(None, "server_idle (example)").unwrap(),
+    );
+
+    loop {
+        match stream.progress(&mut server).await.unwrap() {
+            ServerFlowEvent::GreetingSent { .. } => break,
+            event => println!("unexpected event: {event:?}"),
+        }
+    }
 
     println!("Please enter 'ok', 'no', or 'expunge'");
     let mut lines = Lines::new();
@@ -37,7 +36,7 @@ async fn main() {
 
     loop {
         tokio::select! {
-            event = server.progress() => {
+            event = stream.progress(&mut server) => {
                 match event.unwrap() {
                     ServerFlowEvent::IdleCommandReceived { tag } => {
                         println!("IDLE received");

@@ -1,8 +1,8 @@
-use std::{collections::VecDeque, error::Error};
+use std::collections::VecDeque;
 
 use imap_flow::{
     client::{ClientFlow, ClientFlowEvent, ClientFlowOptions},
-    stream::AnyStream,
+    stream::Stream,
 };
 use imap_types::{
     auth::{AuthMechanism, AuthenticateData},
@@ -12,13 +12,17 @@ use tag_generator::TagGenerator;
 use tokio::net::TcpStream;
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn Error>> {
-    let stream = AnyStream::new(TcpStream::connect("127.0.0.1:12345").await?);
+async fn main() {
+    let stream = TcpStream::connect("127.0.0.1:12345").await.unwrap();
+    let mut stream = Stream::insecure(stream);
+    let mut client = ClientFlow::new(ClientFlowOptions::default());
 
-    let (mut client, greeting) =
-        ClientFlow::receive_greeting(stream, ClientFlowOptions::default()).await?;
-
-    println!("{greeting:?}");
+    loop {
+        match stream.progress(&mut client).await.unwrap() {
+            ClientFlowEvent::GreetingReceived { .. } => break,
+            event => println!("unexpected event: {event:?}"),
+        }
+    }
 
     let mut tag_generator = TagGenerator::new();
 
@@ -34,7 +38,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ]);
 
     loop {
-        let event = client.progress().await?;
+        let event = stream.progress(&mut client).await.unwrap();
         println!("{event:?}");
 
         match event {
@@ -53,6 +57,4 @@ async fn main() -> Result<(), Box<dyn Error>> {
             _ => {}
         }
     }
-
-    Ok(())
 }

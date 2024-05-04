@@ -1,133 +1,324 @@
-use std::{num::NonZeroUsize, pin::Pin};
+use std::{
+    convert::Infallible,
+    io::{ErrorKind, Read, Write},
+    marker::PhantomData,
+};
 
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 #[cfg(debug_assertions)]
 use imap_types::utils::escape_byte_string;
 use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    net::TcpStream,
+    select,
+};
+use tokio_rustls::TlsStream;
 #[cfg(debug_assertions)]
 use tracing::trace;
 
-// TODO: Reconsider this. Do we really need Stream + AnyStream? What is the smallest API that we need to expose?
+use crate::{Flow, FlowInterrupt, FlowIo};
 
-pub trait Stream: AsyncRead + AsyncWrite + Send {}
+pub struct Stream<F> {
+    stream: TcpStream,
+    tls: Option<rustls::Connection>,
+    read_buffer: BytesMut,
+    write_buffer: BytesMut,
+    _flow: PhantomData<F>,
+}
 
-impl<S: AsyncRead + AsyncWrite + Send> Stream for S {}
-
-pub struct AnyStream(pub Pin<Box<dyn Stream>>);
-
-impl AnyStream {
-    pub fn new<S: Stream + 'static>(stream: S) -> Self {
-        Self(Box::pin(stream))
+impl<F> Stream<F> {
+    pub fn insecure(stream: TcpStream) -> Self {
+        Self {
+            stream,
+            tls: None,
+            read_buffer: BytesMut::default(),
+            write_buffer: BytesMut::default(),
+            _flow: PhantomData,
+        }
     }
 
-    /// Reads at least one byte into the buffer and returns the number of read bytes.
-    ///
-    /// Returns [`StreamError::Closed`] when no bytes could be read.
-    pub async fn read(&mut self, read_buffer: &mut ReadBuffer) -> Result<NonZeroUsize, ReadError> {
-        let current_len = read_buffer.bytes.len();
-
-        let byte_count = match read_buffer.limit {
-            None => self.0.read_buf(&mut read_buffer.bytes).await?,
-            Some(limit) => {
-                let remaining_byte_count = limit.saturating_sub(current_len);
-                if remaining_byte_count == 0 {
-                    return Err(ReadError::BufferLimitReached);
-                }
-
-                (&mut self.0)
-                    .take(remaining_byte_count as u64)
-                    .read_buf(&mut read_buffer.bytes)
-                    .await?
+    pub fn tls(stream: TlsStream<TcpStream>) -> Self {
+        // We want to use `TcpStream::split` for handling reading and writing separately,
+        // but `TlsStream` does not expose this functionality. Therefore we destruct `TlsStream`
+        // into `TcpStream` and `rustls::Connection` and handling them ourselves.
+        //
+        // Some notes:
+        //
+        // - There is also `tokio::io::split` which works for all kind of streams. But this
+        //   involves too much scary magic because its use-case is reading and writing from
+        //   different threads. We prefer to use the more low-level `TcpStream::split`.
+        //
+        // - We could get rid of `TlsStream` and construct `rustls::Connection` directly.
+        //   But `TlsStream` is still useful because it give us the guarantee that the handshake
+        //   was already handled properly.
+        //
+        // - In the long run it would be nice if `TlsStream::split` would exist and we would use
+        //   it because `TlsStream` is better at handling the edge cases of `rustls`.
+        let (stream, tls) = match stream {
+            TlsStream::Client(stream) => {
+                let (stream, tls) = stream.into_inner();
+                (stream, rustls::Connection::Client(tls))
+            }
+            TlsStream::Server(stream) => {
+                let (stream, tls) = stream.into_inner();
+                (stream, rustls::Connection::Server(tls))
             }
         };
 
-        #[cfg(debug_assertions)]
-        trace!(
-            data = escape_byte_string(&read_buffer.bytes[current_len..]),
-            "io/read/raw"
-        );
-
-        match NonZeroUsize::new(byte_count) {
-            None => {
-                // The result is 0 if the stream reached "end of file" or the read buffer was
-                // already full before calling `read_buf`. Because we use an unlimited buffer we
-                // know that the first case occurred.
-                Err(ReadError::Closed)
-            }
-            Some(byte_count) => Ok(byte_count),
+        Self {
+            stream,
+            tls: Some(tls),
+            read_buffer: BytesMut::default(),
+            write_buffer: BytesMut::default(),
+            _flow: PhantomData,
         }
     }
 
-    /// Writes all bytes from the write buffer.
-    ///
-    /// Returns [`StreamError::Closed`] when not all bytes could be written.
-    pub async fn write_all(&mut self, write_buffer: &mut WriteBuffer) -> Result<(), WriteError> {
-        while !write_buffer.bytes.is_empty() {
-            let byte_count = self.0.write(&write_buffer.bytes).await?;
-            #[cfg(debug_assertions)]
-            trace!(
-                data = escape_byte_string(&write_buffer.bytes[..byte_count]),
-                "io/write/raw"
-            );
-            write_buffer.bytes.advance(byte_count);
-
-            if byte_count == 0 {
-                // The result is 0 if the stream doesn't accept bytes anymore or the write buffer
-                // was already empty before calling `write_buf`. Because we checked the buffer
-                // we know that the first case occurred.
-                return Err(WriteError::Closed);
-            }
+    pub async fn flush(&mut self) -> Result<(), StreamError<Infallible>> {
+        // Flush TLS
+        if let Some(tls) = &mut self.tls {
+            tls.writer().flush()?;
+            encrypt(tls, &mut self.write_buffer, Vec::new())?;
         }
+
+        // Flush TCP
+        write(&mut self.stream, &mut self.write_buffer).await?;
+        self.stream.flush().await?;
 
         Ok(())
     }
+
+    #[cfg(feature = "expose_stream")]
+    /// Return the underlying stream for debug purposes (or experiments).
+    ///
+    /// Note: Writing to or reading from the stream may introduce
+    /// conflicts with `imap-flow`.
+    pub fn stream_mut(&mut self) -> &mut TcpStream {
+        &mut self.stream
+    }
 }
 
-/// Error raised by [`AnyStream::read`].
+impl<F: Flow> Stream<F> {
+    pub async fn progress(&mut self, flow: &mut F) -> Result<F::Event, StreamError<F::Error>> {
+        let event = loop {
+            match &mut self.tls {
+                None => {
+                    // Provide input bytes to the client/server
+                    if !self.read_buffer.is_empty() {
+                        flow.enqueue_input(&self.read_buffer);
+                        self.read_buffer.clear();
+                    }
+                }
+                Some(tls) => {
+                    // Decrypt input bytes
+                    let plain_bytes = decrypt(tls, &mut self.read_buffer)?;
+
+                    // Provide input bytes to the client/server
+                    if !plain_bytes.is_empty() {
+                        flow.enqueue_input(&plain_bytes);
+                    }
+                }
+            }
+
+            // Progress the client/server
+            let result = flow.progress();
+
+            // Return events immediately without doing IO
+            let interrupt = match result {
+                Err(interrupt) => interrupt,
+                Ok(event) => break event,
+            };
+
+            // Return errors immediately without doing IO
+            let io = match interrupt {
+                FlowInterrupt::Io(io) => io,
+                FlowInterrupt::Error(err) => return Err(StreamError::Flow(err)),
+            };
+
+            match &mut self.tls {
+                None => {
+                    // Handle the output bytes from the client/server
+                    if let FlowIo::Output(bytes) = io {
+                        self.write_buffer.extend(bytes);
+                    }
+                }
+                Some(tls) => {
+                    // Handle the output bytes from the client/server
+                    let plain_bytes = if let FlowIo::Output(bytes) = io {
+                        bytes
+                    } else {
+                        Vec::new()
+                    };
+
+                    // Encrypt output bytes
+                    encrypt(tls, &mut self.write_buffer, plain_bytes)?;
+                }
+            }
+
+            // Progress the stream
+            if self.write_buffer.is_empty() {
+                read(&mut self.stream, &mut self.read_buffer).await?;
+            } else {
+                // We read and write the stream simultanously because otherwise a
+                // a dead lock between client and server might occur if both sides
+                // would only read or only write.
+                let (read_stream, write_stream) = self.stream.split();
+                select! {
+                    result = read(read_stream, &mut self.read_buffer) => result,
+                    result = write(write_stream, &mut self.write_buffer) => result,
+                }?;
+            };
+        };
+
+        Ok(event)
+    }
+}
+
+/// Error during reading into or writing from a stream.
 #[derive(Debug, Error)]
-pub enum ReadError {
+pub enum StreamError<E> {
     /// The operation failed because the stream is closed.
     ///
-    /// We detect this by checking if the read byte count is 0. Whether the stream is
+    /// We detect this by checking if the read or written byte count is 0. Whether the stream is
     /// closed indefinitely or temporarily depend on the actual stream implementation.
     #[error("Stream was closed")]
     Closed,
     /// An I/O error occurred in the underlying stream.
     #[error(transparent)]
     Io(#[from] tokio::io::Error),
-    /// Can't read more bytes because the buffer limit is already reached.
-    #[error("Read buffer has overflown")]
-    BufferLimitReached,
+    /// An error occurred in the underlying TLS connection.
+    #[error(transparent)]
+    Tls(#[from] rustls::Error),
+    /// An error occurred in the IMAP flow.
+    #[error(transparent)]
+    Flow(E),
 }
 
-/// Error raised by [`AnyStream::write_all`].
+async fn read<S: AsyncRead + Unpin>(
+    mut stream: S,
+    read_buffer: &mut BytesMut,
+) -> Result<(), ReadWriteError> {
+    #[cfg(debug_assertions)]
+    let old_len = read_buffer.len();
+    let byte_count = stream.read_buf(read_buffer).await?;
+    #[cfg(debug_assertions)]
+    trace!(
+        data = escape_byte_string(&read_buffer[old_len..]),
+        "io/read/raw"
+    );
+
+    if byte_count == 0 {
+        // The result is 0 if the stream reached "end of file" or the read buffer was
+        // already full before calling `read_buf`. Because we use an unlimited buffer we
+        // know that the first case occurred.
+        return Err(ReadWriteError::Closed);
+    }
+
+    Ok(())
+}
+
+async fn write<S: AsyncWrite + Unpin>(
+    mut stream: S,
+    write_buffer: &mut BytesMut,
+) -> Result<(), ReadWriteError> {
+    while !write_buffer.is_empty() {
+        let byte_count = stream.write(write_buffer).await?;
+        #[cfg(debug_assertions)]
+        trace!(
+            data = escape_byte_string(&write_buffer[..byte_count]),
+            "io/write/raw"
+        );
+        write_buffer.advance(byte_count);
+
+        if byte_count == 0 {
+            // The result is 0 if the stream doesn't accept bytes anymore or the write buffer
+            // was already empty before calling `write_buf`. Because we checked the buffer
+            // we know that the first case occurred.
+            return Err(ReadWriteError::Closed);
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Error)]
-pub enum WriteError {
-    /// The operation failed because the stream is closed.
-    ///
-    /// We detect this by checking if the written byte count is 0. Whether the stream is
-    /// closed indefinitely or temporarily depend on the actual stream implementation.
+enum ReadWriteError {
     #[error("Stream was closed")]
     Closed,
-    /// An I/O error occurred in the underlying stream.
     #[error(transparent)]
     Io(#[from] tokio::io::Error),
 }
 
-/// Buffer for reading bytes with [`AnyStream::read`].
-#[derive(Default)]
-pub struct ReadBuffer {
-    pub bytes: BytesMut,
-    /// The max number of bytes to be stored in `bytes`.
-    ///
-    /// If the maximum number is reached and [`AnyStream::read`] is called,
-    /// it results in [`ReadError::BufferLimitReached`].
-    pub limit: Option<usize>,
+impl<E> From<ReadWriteError> for StreamError<E> {
+    fn from(value: ReadWriteError) -> Self {
+        match value {
+            ReadWriteError::Closed => StreamError::Closed,
+            ReadWriteError::Io(err) => StreamError::Io(err),
+        }
+    }
 }
 
-/// Buffer for writing bytes with [`AnyStream::write`].
-#[derive(Default)]
-pub struct WriteBuffer {
-    pub bytes: BytesMut,
+fn decrypt(
+    tls: &mut rustls::Connection,
+    read_buffer: &mut BytesMut,
+) -> Result<Vec<u8>, DecryptEncryptError> {
+    let mut plain_bytes = Vec::new();
+
+    while tls.wants_read() && !read_buffer.is_empty() {
+        let mut encrypted_bytes = read_buffer.reader();
+        tls.read_tls(&mut encrypted_bytes)?;
+        tls.process_new_packets()?;
+
+        loop {
+            let mut plain_bytes_chunk = [0; 128];
+            match tls.reader().read(&mut plain_bytes_chunk) {
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    // `rustls` doesn't have more data to yield, but it believes the
+                    // connection is open. Not sure why an error needs to be handled for
+                    // that case, but `tokio_rustls` does the same, see
+                    // https://github.com/rustls/tokio-rustls/blob/7448a86b7b5eb69b438dae0782c179e55a2d3e4f/src/common/mod.rs#L226
+                    break;
+                }
+                Err(err) => return Err(DecryptEncryptError::Io(err)),
+                Ok(n) => plain_bytes.extend(&plain_bytes_chunk[0..n]),
+            };
+        }
+    }
+
+    Ok(plain_bytes)
+}
+
+fn encrypt(
+    tls: &mut rustls::Connection,
+    write_buffer: &mut BytesMut,
+    plain_bytes: Vec<u8>,
+) -> Result<(), DecryptEncryptError> {
+    if !plain_bytes.is_empty() {
+        tls.writer().write_all(&plain_bytes)?;
+    }
+
+    while tls.wants_write() {
+        let mut encrypted_bytes = write_buffer.writer();
+        tls.write_tls(&mut encrypted_bytes)?;
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Error)]
+enum DecryptEncryptError {
+    #[error(transparent)]
+    Io(#[from] tokio::io::Error),
+    #[error(transparent)]
+    Tls(#[from] rustls::Error),
+}
+
+impl<E> From<DecryptEncryptError> for StreamError<E> {
+    fn from(value: DecryptEncryptError) -> Self {
+        match value {
+            DecryptEncryptError::Io(err) => StreamError::Io(err),
+            DecryptEncryptError::Tls(err) => StreamError::Tls(err),
+        }
+    }
 }

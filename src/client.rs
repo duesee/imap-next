@@ -1,6 +1,5 @@
 use std::fmt::{Debug, Formatter};
 
-use bytes::BytesMut;
 use imap_codec::{
     decode::{GreetingDecodeError, ResponseDecodeError},
     AuthenticateDataCodec, CommandCodec, GreetingCodec, IdleDoneCodec, ResponseCodec,
@@ -15,10 +14,10 @@ use thiserror::Error;
 
 use crate::{
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
-    receive::{ReceiveEvent, ReceiveState},
+    receive::{ReceiveError, ReceiveEvent, ReceiveState},
     send_command::{SendCommandEvent, SendCommandState, SendCommandTermination},
-    stream::{AnyStream, ReadBuffer, ReadError, WriteBuffer, WriteError},
     types::CommandAuthenticate,
+    Flow, FlowInterrupt,
 };
 
 static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ClientFlowCommandHandle> =
@@ -41,10 +40,9 @@ impl Default for ClientFlowOptions {
 }
 
 pub struct ClientFlow {
-    stream: AnyStream,
     handle_generator: HandleGenerator<ClientFlowCommandHandle>,
     send_command_state: SendCommandState,
-    receive_response_state: ReceiveState<ResponseCodec>,
+    receive_state: ClientReceiveState,
 }
 
 impl Debug for ClientFlow {
@@ -55,65 +53,46 @@ impl Debug for ClientFlow {
     }
 }
 
+impl Flow for ClientFlow {
+    type Event = ClientFlowEvent;
+    type Error = ClientFlowError;
+
+    fn enqueue_input(&mut self, bytes: &[u8]) {
+        self.enqueue_input(bytes)
+    }
+
+    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
+        self.progress()
+    }
+}
+
 impl ClientFlow {
-    pub async fn receive_greeting(
-        mut stream: AnyStream,
-        options: ClientFlowOptions,
-    ) -> Result<(Self, Greeting<'static>), ClientFlowError> {
-        // Receive greeting.
-        let read_buffer = ReadBuffer {
-            bytes: BytesMut::new(),
-            // No limit is set because we trust the server
-            limit: None,
-        };
-        let mut receive_greeting_state =
-            ReceiveState::new(GreetingCodec::default(), options.crlf_relaxed, read_buffer);
-
-        let greeting = match receive_greeting_state.progress(&mut stream).await {
-            Ok(ReceiveEvent::DecodingSuccess(greeting)) => {
-                receive_greeting_state.finish_message();
-                greeting
-            }
-            Ok(ReceiveEvent::DecodingFailure(
-                GreetingDecodeError::Failed | GreetingDecodeError::Incomplete,
-            )) => {
-                let discarded_bytes = receive_greeting_state.discard_message().into();
-                return Err(ClientFlowError::MalformedMessage { discarded_bytes });
-            }
-            Ok(ReceiveEvent::ExpectedCrlfGotLf) => {
-                let discarded_bytes = receive_greeting_state.discard_message().into();
-                return Err(ClientFlowError::ExpectedCrlfGotLf { discarded_bytes });
-            }
-            Err(ReadError::Closed) => return Err(ClientFlowError::StreamClosed),
-            Err(ReadError::Io(err)) => return Err(ClientFlowError::Io(err)),
-            Err(ReadError::BufferLimitReached) => {
-                // Unreachable because limit is not set for read buffer.
-                unreachable!()
-            }
-        };
-
-        // Create state to send commands ...
-        let write_buffer = WriteBuffer {
-            bytes: BytesMut::new(),
-        };
+    pub fn new(options: ClientFlowOptions) -> Self {
         let send_command_state = SendCommandState::new(
             CommandCodec::default(),
             AuthenticateDataCodec::default(),
             IdleDoneCodec::default(),
-            write_buffer,
         );
 
-        // ..., and state to receive responses.
-        let receive_response_state = receive_greeting_state.change_codec(ResponseCodec::new());
+        let receive_state = ClientReceiveState::Greeting(ReceiveState::new(
+            GreetingCodec::default(),
+            options.crlf_relaxed,
+            None,
+        ));
 
-        let client_flow = Self {
-            stream,
+        Self {
             handle_generator: HANDLE_GENERATOR_GENERATOR.generate(),
             send_command_state,
-            receive_response_state,
-        };
+            receive_state,
+        }
+    }
 
-        Ok((client_flow, greeting))
+    pub fn enqueue_input(&mut self, bytes: &[u8]) {
+        match &mut self.receive_state {
+            ClientReceiveState::Greeting(state) => state.enqueue_input(bytes),
+            ClientReceiveState::Response(state) => state.enqueue_input(bytes),
+            ClientReceiveState::Dummy => unreachable!(),
+        }
     }
 
     /// Enqueues the [`Command`] for being sent to the client.
@@ -127,141 +106,175 @@ impl ClientFlow {
         handle
     }
 
-    pub async fn progress(&mut self) -> Result<ClientFlowEvent, ClientFlowError> {
-        // The client must do two things:
-        // - Sending commands to the server.
-        // - Receiving responses from the server.
-        //
-        // There are two ways to accomplish that:
-        // - Doing both in parallel.
-        // - Doing both consecutively.
-        //
-        // Doing both in parallel is more complicated because both operations share the same
-        // state and the borrow checker prevents the naive approach. We would need to introduce
-        // interior mutability.
-        //
-        // Doing both consecutively is easier. But in which order? Receiving responses will block
-        // indefinitely because we never know when the server is sending the next response.
-        // Sending commands will be completed in the foreseeable future because for practical
-        // purposes we can assume that the number of commands is finite and the stream will be
-        // able to transfer all bytes soon.
-        //
-        // Therefore we prefer the second approach and begin with sending the commands.
+    pub fn progress(&mut self) -> Result<ClientFlowEvent, FlowInterrupt<ClientFlowError>> {
         loop {
-            if let Some(event) = self.progress_send().await? {
+            if let Some(event) = self.progress_send()? {
                 return Ok(event);
             }
 
-            if let Some(event) = self.progress_receive().await? {
+            if let Some(event) = self.progress_receive()? {
                 return Ok(event);
             }
         }
     }
 
-    async fn progress_send(&mut self) -> Result<Option<ClientFlowEvent>, ClientFlowError> {
-        match self.send_command_state.progress(&mut self.stream).await? {
-            Some(SendCommandEvent::Command { handle, command }) => {
+    fn progress_send(&mut self) -> Result<Option<ClientFlowEvent>, FlowInterrupt<ClientFlowError>> {
+        // Abort if we didn't received the greeting yet
+        if let ClientReceiveState::Greeting(_) = &self.receive_state {
+            return Ok(None);
+        }
+
+        match self.send_command_state.progress() {
+            Ok(Some(SendCommandEvent::Command { handle, command })) => {
                 Ok(Some(ClientFlowEvent::CommandSent { handle, command }))
             }
-            Some(SendCommandEvent::CommandAuthenticate { handle }) => {
+            Ok(Some(SendCommandEvent::CommandAuthenticate { handle })) => {
                 Ok(Some(ClientFlowEvent::AuthenticateStarted { handle }))
             }
-            Some(SendCommandEvent::CommandIdle { handle }) => {
+            Ok(Some(SendCommandEvent::CommandIdle { handle })) => {
                 Ok(Some(ClientFlowEvent::IdleCommandSent { handle }))
             }
-            Some(SendCommandEvent::IdleDone { handle }) => {
+            Ok(Some(SendCommandEvent::IdleDone { handle })) => {
                 Ok(Some(ClientFlowEvent::IdleDoneSent { handle }))
             }
-            None => Ok(None),
+            Ok(None) => Ok(None),
+            Err(FlowInterrupt::Io(io)) => Err(FlowInterrupt::Io(io)),
+            Err(FlowInterrupt::Error(_)) => unreachable!(),
         }
     }
 
-    async fn progress_receive(&mut self) -> Result<Option<ClientFlowEvent>, ClientFlowError> {
+    fn progress_receive(
+        &mut self,
+    ) -> Result<Option<ClientFlowEvent>, FlowInterrupt<ClientFlowError>> {
         let event = loop {
-            let response = match self.receive_response_state.progress(&mut self.stream).await {
-                Ok(ReceiveEvent::DecodingSuccess(response)) => {
-                    self.receive_response_state.finish_message();
-                    response
-                }
-                Ok(ReceiveEvent::DecodingFailure(ResponseDecodeError::LiteralFound { length })) => {
-                    // The client must accept the literal in any case.
-                    self.receive_response_state.start_literal(length);
-                    continue;
-                }
-                Ok(ReceiveEvent::DecodingFailure(
-                    ResponseDecodeError::Failed | ResponseDecodeError::Incomplete,
-                )) => {
-                    let discarded_bytes = self.receive_response_state.discard_message().into();
-                    return Err(ClientFlowError::MalformedMessage { discarded_bytes });
-                }
-                Ok(ReceiveEvent::ExpectedCrlfGotLf) => {
-                    let discarded_bytes = self.receive_response_state.discard_message().into();
-                    return Err(ClientFlowError::ExpectedCrlfGotLf { discarded_bytes });
-                }
-                Err(ReadError::Closed) => return Err(ClientFlowError::StreamClosed),
-                Err(ReadError::Io(err)) => return Err(ClientFlowError::Io(err)),
-                Err(ReadError::BufferLimitReached) => {
-                    // Unreachable because limit is not set for read buffer.
-                    unreachable!()
-                }
-            };
-
-            match response {
-                Response::Status(status) => {
-                    let event = if let Some(finish_result) =
-                        self.send_command_state.maybe_remove(&status)
-                    {
-                        match finish_result {
-                            SendCommandTermination::LiteralRejected { handle, command } => {
-                                ClientFlowEvent::CommandRejected {
-                                    handle,
-                                    command,
-                                    status,
-                                }
-                            }
-                            SendCommandTermination::AuthenticateAccepted {
-                                handle,
-                                command_authenticate,
-                            }
-                            | SendCommandTermination::AuthenticateRejected {
-                                handle,
-                                command_authenticate,
-                            } => ClientFlowEvent::AuthenticateStatusReceived {
-                                handle,
-                                command_authenticate,
-                                status,
-                            },
-                            SendCommandTermination::IdleRejected { handle } => {
-                                ClientFlowEvent::IdleRejected { handle, status }
-                            }
+            match &mut self.receive_state {
+                ClientReceiveState::Greeting(state) => {
+                    match state.progress() {
+                        Ok(ReceiveEvent::DecodingSuccess(greeting)) => {
+                            state.finish_message();
+                            self.receive_state.change_state();
+                            break Some(ClientFlowEvent::GreetingReceived { greeting });
                         }
-                    } else {
-                        ClientFlowEvent::StatusReceived { status }
+                        Err(FlowInterrupt::Io(io)) => return Err(FlowInterrupt::Io(io)),
+                        Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
+                            GreetingDecodeError::Failed | GreetingDecodeError::Incomplete,
+                        ))) => {
+                            let discarded_bytes = state.discard_message();
+                            return Err(FlowInterrupt::Error(ClientFlowError::MalformedMessage {
+                                discarded_bytes: Secret::new(discarded_bytes),
+                            }));
+                        }
+                        Err(FlowInterrupt::Error(ReceiveError::ExpectedCrlfGotLf)) => {
+                            let discarded_bytes = state.discard_message();
+                            return Err(FlowInterrupt::Error(ClientFlowError::ExpectedCrlfGotLf {
+                                discarded_bytes: Secret::new(discarded_bytes),
+                            }));
+                        }
+                        Err(FlowInterrupt::Error(ReceiveError::MessageTooLong)) => {
+                            // Unreachable because message limit is not set
+                            unreachable!()
+                        }
+                    }
+                }
+                ClientReceiveState::Response(state) => {
+                    let response = match state.progress() {
+                        Ok(ReceiveEvent::DecodingSuccess(response)) => {
+                            state.finish_message();
+                            response
+                        }
+                        Err(FlowInterrupt::Io(io)) => return Err(FlowInterrupt::Io(io)),
+                        Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
+                            ResponseDecodeError::LiteralFound { length },
+                        ))) => {
+                            // The client must accept the literal in any case.
+                            state.start_literal(length);
+                            continue;
+                        }
+                        Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
+                            ResponseDecodeError::Failed | ResponseDecodeError::Incomplete,
+                        ))) => {
+                            let discarded_bytes = state.discard_message();
+                            return Err(FlowInterrupt::Error(ClientFlowError::MalformedMessage {
+                                discarded_bytes: Secret::new(discarded_bytes),
+                            }));
+                        }
+                        Err(FlowInterrupt::Error(ReceiveError::ExpectedCrlfGotLf)) => {
+                            let discarded_bytes = state.discard_message();
+                            return Err(FlowInterrupt::Error(ClientFlowError::ExpectedCrlfGotLf {
+                                discarded_bytes: Secret::new(discarded_bytes),
+                            }));
+                        }
+                        Err(FlowInterrupt::Error(ReceiveError::MessageTooLong)) => {
+                            // Unreachable because message limit is not set
+                            unreachable!()
+                        }
                     };
 
-                    break Some(event);
-                }
-                Response::Data(data) => break Some(ClientFlowEvent::DataReceived { data }),
-                Response::CommandContinuationRequest(continuation_request) => {
-                    if self.send_command_state.literal_continue() {
-                        // We received a continuation request that was necessary for sending a command.
-                        // So we abort receiving responses for now and continue with sending commands.
-                        break None;
-                    } else if let Some(handle) = self.send_command_state.authenticate_continue() {
-                        break Some(ClientFlowEvent::AuthenticateContinuationRequestReceived {
-                            handle,
-                            continuation_request,
-                        });
-                    } else if let Some(handle) = self.send_command_state.idle_continue() {
-                        break Some(ClientFlowEvent::IdleAccepted {
-                            handle,
-                            continuation_request,
-                        });
-                    } else {
-                        break Some(ClientFlowEvent::ContinuationRequestReceived {
-                            continuation_request,
-                        });
+                    match response {
+                        Response::Status(status) => {
+                            let event = if let Some(finish_result) =
+                                self.send_command_state.maybe_remove(&status)
+                            {
+                                match finish_result {
+                                    SendCommandTermination::LiteralRejected { handle, command } => {
+                                        ClientFlowEvent::CommandRejected {
+                                            handle,
+                                            command,
+                                            status,
+                                        }
+                                    }
+                                    SendCommandTermination::AuthenticateAccepted {
+                                        handle,
+                                        command_authenticate,
+                                    }
+                                    | SendCommandTermination::AuthenticateRejected {
+                                        handle,
+                                        command_authenticate,
+                                    } => ClientFlowEvent::AuthenticateStatusReceived {
+                                        handle,
+                                        command_authenticate,
+                                        status,
+                                    },
+                                    SendCommandTermination::IdleRejected { handle } => {
+                                        ClientFlowEvent::IdleRejected { handle, status }
+                                    }
+                                }
+                            } else {
+                                ClientFlowEvent::StatusReceived { status }
+                            };
+
+                            break Some(event);
+                        }
+                        Response::Data(data) => break Some(ClientFlowEvent::DataReceived { data }),
+                        Response::CommandContinuationRequest(continuation_request) => {
+                            if self.send_command_state.literal_continue() {
+                                // We received a continuation request that was necessary for sending a command.
+                                // So we abort receiving responses for now and continue with sending commands.
+                                break None;
+                            } else if let Some(handle) =
+                                self.send_command_state.authenticate_continue()
+                            {
+                                break Some(
+                                    ClientFlowEvent::AuthenticateContinuationRequestReceived {
+                                        handle,
+                                        continuation_request,
+                                    },
+                                );
+                            } else if let Some(handle) = self.send_command_state.idle_continue() {
+                                break Some(ClientFlowEvent::IdleAccepted {
+                                    handle,
+                                    continuation_request,
+                                });
+                            } else {
+                                break Some(ClientFlowEvent::ContinuationRequestReceived {
+                                    continuation_request,
+                                });
+                            }
+                        }
                     }
+                }
+                ClientReceiveState::Dummy => {
+                    unreachable!()
                 }
             }
         };
@@ -280,14 +293,26 @@ impl ClientFlow {
     pub fn set_idle_done(&mut self) -> Option<ClientFlowCommandHandle> {
         self.send_command_state.set_idle_done()
     }
+}
 
-    #[cfg(feature = "expose_stream")]
-    /// Return the underlying stream for debug purposes (or experiments).
-    ///
-    /// Note: Writing to or reading from the stream may introduce
-    /// conflicts with imap-flow.
-    pub fn stream_mut(&mut self) -> &mut AnyStream {
-        &mut self.stream
+enum ClientReceiveState {
+    Greeting(ReceiveState<GreetingCodec>),
+    Response(ReceiveState<ResponseCodec>),
+    // This state is set only temporarily during `ClientReceiveState::change_state`
+    Dummy,
+}
+
+impl ClientReceiveState {
+    fn change_state(&mut self) {
+        // NOTE: This function MUST NOT panic. Otherwise the dummy state will remain indefinitely.
+        let old_state = std::mem::replace(self, ClientReceiveState::Dummy);
+        let codec = ResponseCodec::default();
+        let new_state = Self::Response(match old_state {
+            Self::Greeting(state) => state.change_codec(codec),
+            Self::Response(state) => state,
+            Self::Dummy => unreachable!(),
+        });
+        *self = new_state;
     }
 }
 
@@ -318,6 +343,10 @@ impl Debug for ClientFlowCommandHandle {
 
 #[derive(Debug)]
 pub enum ClientFlowEvent {
+    /// Server [`Greeting`] received.
+    GreetingReceived {
+        greeting: Greeting<'static>,
+    },
     /// Enqueued [`Command`] successfully sent.
     CommandSent {
         /// Handle to the enqueued [`Command`].
@@ -391,21 +420,8 @@ pub enum ClientFlowEvent {
 
 #[derive(Debug, Error)]
 pub enum ClientFlowError {
-    #[error("Stream was closed")]
-    StreamClosed,
-    #[error(transparent)]
-    Io(#[from] tokio::io::Error),
     #[error("Expected `\\r\\n`, got `\\n`")]
     ExpectedCrlfGotLf { discarded_bytes: Secret<Box<[u8]>> },
     #[error("Received malformed message")]
     MalformedMessage { discarded_bytes: Secret<Box<[u8]>> },
-}
-
-impl From<WriteError> for ClientFlowError {
-    fn from(err: WriteError) -> Self {
-        match err {
-            WriteError::Closed => Self::StreamClosed,
-            WriteError::Io(err) => Self::Io(err),
-        }
-    }
 }

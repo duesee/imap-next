@@ -7,7 +7,10 @@ use std::{
     marker::PhantomData,
 };
 
-use imap_flow::client::{ClientFlow, ClientFlowCommandHandle, ClientFlowError, ClientFlowEvent};
+use imap_flow::{
+    client::{ClientFlow, ClientFlowCommandHandle, ClientFlowError, ClientFlowEvent},
+    Flow, FlowInterrupt,
+};
 use imap_types::{
     auth::AuthenticateData,
     command::{Command, CommandBody},
@@ -87,6 +90,19 @@ pub struct Scheduler {
     tag_generator: TagGenerator,
 }
 
+impl Flow for Scheduler {
+    type Event = SchedulerEvent;
+    type Error = SchedulerError;
+
+    fn enqueue_input(&mut self, bytes: &[u8]) {
+        self.enqueue_input(bytes);
+    }
+
+    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
+        self.progress()
+    }
+}
+
 impl Scheduler {
     /// Create a new scheduler.
     pub fn new(flow: ClientFlow) -> Self {
@@ -120,12 +136,25 @@ impl Scheduler {
         TaskHandle::new(handle)
     }
 
+    pub fn enqueue_input(&mut self, bytes: &[u8]) {
+        self.flow.enqueue_input(bytes);
+    }
+
     /// Progress the connection returning the next event.
-    pub async fn progress(&mut self) -> Result<SchedulerEvent, SchedulerError> {
+    pub fn progress(&mut self) -> Result<SchedulerEvent, FlowInterrupt<SchedulerError>> {
         loop {
-            let event = self.flow.progress().await?;
+            let event = match self.flow.progress() {
+                Ok(event) => event,
+                Err(FlowInterrupt::Io(io)) => return Err(FlowInterrupt::Io(io)),
+                Err(FlowInterrupt::Error(err)) => {
+                    return Err(FlowInterrupt::Error(SchedulerError::Flow(err)))
+                }
+            };
 
             match event {
+                ClientFlowEvent::GreetingReceived { .. } => {
+                    // We have no use for this yet
+                }
                 ClientFlowEvent::CommandSent { handle, .. } => {
                     // This `unwrap` can't fail because `waiting_tasks` contains all unsent `Commands`.
                     let (handle, tag, task) = self.waiting_tasks.remove_by_handle(handle).unwrap();
@@ -223,10 +252,9 @@ impl Scheduler {
                     }
                     Status::Tagged(Tagged { tag, body }) => {
                         let Some((handle, _, task)) = self.active_tasks.remove_by_tag(&tag) else {
-                            return Err(SchedulerError::UnexpectedTaggedResponse(Tagged {
-                                tag,
-                                body,
-                            }));
+                            return Err(FlowInterrupt::Error(
+                                SchedulerError::UnexpectedTaggedResponse(Tagged { tag, body }),
+                            ));
                         };
 
                         let output = Some(task.process_tagged(body));
