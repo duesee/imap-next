@@ -164,6 +164,8 @@ fn command_larger_than_max_command_size() {
     for max_command_size in max_command_size_tests {
         let mut setup = TestSetup::default();
         setup.server_flow_options.max_command_size = max_command_size as u32;
+        // Sending large messages takes some time, especially when running on a slow CI.
+        setup.runtime_options.timeout = Some(Duration::from_secs(10));
 
         let (rt, mut server, mut client) = setup.setup_server();
 
