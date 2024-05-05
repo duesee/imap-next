@@ -187,3 +187,60 @@ fn command_larger_than_max_command_size() {
         );
     }
 }
+
+#[test]
+fn command_with_literals_larger_than_max_command_size() {
+    // The server will reject the login command because it's larger than the max size.
+    // We use only single digit sizes for the password literal because otherwise the
+    // size of the non-literal part would also change.
+    let password_size_tests = [4, 5, 6, 7, 8, 9];
+
+    for password_size in password_size_tests {
+        let max_command_size = 28;
+
+        let mut setup = TestSetup::default();
+        setup.server_flow_options.literal_accept_text = Text::unvalidated("more data");
+        // Max literal size must be smaller than max command size
+        setup.server_flow_options.max_literal_size = password_size as u32;
+        setup.server_flow_options.max_command_size = max_command_size as u32;
+
+        let (rt, mut server, mut client) = setup.setup_server();
+
+        let greeting = b"* OK ...\r\n";
+        rt.run2(server.send_greeting(greeting), client.receive(greeting));
+
+        // Login command smaller than the max size can be received
+        let login = b"A1 LOGIN {3}\r\nABC {3}\r\n...\r\n";
+        let continuation_request = b"+ more data\r\n";
+        dbg!(login.len());
+        rt.run2(
+            async {
+                client.send(&login[..14]).await;
+                client.receive(continuation_request).await;
+                client.send(&login[14..25]).await;
+                client.receive(continuation_request).await;
+                client.send(&login[25..]).await;
+            },
+            server.receive_command(login),
+        );
+
+        // Login command larger than the max size triggers an error
+        let large_login = format!(
+            "A1 LOGIN {{3}}\r\nABC {{{}}}\r\n{}\r\n",
+            password_size,
+            String::from_utf8(vec![b'.'; password_size]).unwrap(),
+        )
+        .into_bytes();
+        dbg!(large_login.len());
+        rt.run2(
+            async {
+                client.send(&large_login[..14]).await;
+                client.receive(continuation_request).await;
+                client.send(&large_login[14..25]).await;
+                client.receive(continuation_request).await;
+                client.send(&large_login[25..]).await;
+            },
+            server.receive_error_because_command_too_long(&large_login[..max_command_size]),
+        );
+    }
+}
