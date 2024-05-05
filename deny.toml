@@ -7,4 +7,4 @@ allow-git = [
 ]
 
 [licenses]
-allow = [ "Apache-2.0", "MIT", "Unicode-DFS-2016" ]
+allow = [ "Apache-2.0", "MIT", "Unicode-DFS-2016", "ISC" ]
