@@ -365,8 +365,8 @@ fn handle_server_event(
 
     match event {
         ClientFlowEvent::GreetingReceived { greeting } => {
-            // This event will only emitted at the beginning and we already handled it
-            // somewhere else
+            // This event is emitted only at the beginning so we must have already
+            // handled it somewhere else.
             error!(role = "s2p", ?greeting, "Unexpected greeting");
         }
         ClientFlowEvent::CommandSent { handle, .. } => {

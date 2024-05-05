@@ -9,12 +9,12 @@ pub struct ReceiveState<C> {
     crlf_relaxed: bool,
     max_message_size: Option<u32>,
     next_fragment: NextFragment,
-    // How many bytes in the parse buffer do we already have checked?
-    // This is important if we need multiple attempts to read from the underlying
-    // stream before the message is completely received.
+    /// How many bytes in the parse buffer do we already have checked?
+    /// This is important if we need multiple attempts to read from the underlying
+    /// stream before the message is completely received.
     seen_bytes: usize,
-    // Used for reading the current message from the stream.
-    // Its length should always be equal to or greater than `seen_bytes`.
+    /// Used for reading the current message from the stream.
+    /// Its length should always be equal to or greater than `seen_bytes`.
     read_buffer: BytesMut,
 }
 
