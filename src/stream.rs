@@ -40,7 +40,7 @@ impl<F> Stream<F> {
 
     pub fn tls(stream: TlsStream<TcpStream>) -> Self {
         // We want to use `TcpStream::split` for handling reading and writing separately,
-        // but `TlsStream` does not expose this functionality. Therefore we destruct `TlsStream`
+        // but `TlsStream` does not expose this functionality. Therefore, we destruct `TlsStream`
         // into `TcpStream` and `rustls::Connection` and handling them ourselves.
         //
         // Some notes:
@@ -50,7 +50,7 @@ impl<F> Stream<F> {
         //   different threads. We prefer to use the more low-level `TcpStream::split`.
         //
         // - We could get rid of `TlsStream` and construct `rustls::Connection` directly.
-        //   But `TlsStream` is still useful because it give us the guarantee that the handshake
+        //   But `TlsStream` is still useful because it gives us the guarantee that the handshake
         //   was already handled properly.
         //
         // - In the long run it would be nice if `TlsStream::split` would exist and we would use
@@ -160,7 +160,7 @@ impl<F: Flow> Stream<F> {
             if self.write_buffer.is_empty() {
                 read(&mut self.stream, &mut self.read_buffer).await?;
             } else {
-                // We read and write the stream simultaneously because otherwise a
+                // We read and write the stream simultaneously because otherwise
                 // a deadlock between client and server might occur if both sides
                 // would only read or only write.
                 let (read_stream, write_stream) = self.stream.split();
