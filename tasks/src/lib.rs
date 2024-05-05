@@ -18,6 +18,9 @@ use imap_types::{
     response::{Bye, CommandContinuationRequest, Data, Response, Status, StatusBody, Tagged},
 };
 use tag_generator::TagGenerator;
+use tasks::{
+    authenticate::AuthenticateTask, capability::CapabilityTask, logout::LogoutTask, noop::NoOpTask,
+};
 use thiserror::Error;
 
 /// Tells how a specific IMAP [`Command`] is processed.
@@ -134,6 +137,40 @@ impl Scheduler {
         self.waiting_tasks.push_back(handle, tag, Box::new(task));
 
         TaskHandle::new(handle)
+    }
+
+    /// Enqueue a [`Task`] for immediate resolution.
+    pub fn run_task<'a, T: Task>(&'a mut self, task: T) -> TaskRunner<'a, T> {
+        let handle = self.enqueue_task(task);
+
+        TaskRunner {
+            scheduler: self,
+            handle,
+        }
+    }
+
+    /// Run the [`CapabilityTask`].
+    pub fn capability(&mut self) -> TaskRunner<CapabilityTask> {
+        self.run_task(CapabilityTask::new())
+    }
+
+    /// Run the [`AuthenticateTask`], using the `PLAIN` auth mechanism.
+    pub fn authenticate_plain(
+        &mut self,
+        login: &str,
+        passwd: &str,
+    ) -> TaskRunner<AuthenticateTask> {
+        self.run_task(AuthenticateTask::plain(login, passwd, true))
+    }
+
+    /// Run the [`LogoutTask`].
+    pub fn logout(&mut self) -> TaskRunner<LogoutTask> {
+        self.run_task(LogoutTask::new())
+    }
+
+    /// Run the [`NoOpTask`].
+    pub fn noop(&mut self) -> TaskRunner<NoOpTask> {
+        self.run_task(NoOpTask::new())
     }
 
     pub fn enqueue_input(&mut self, bytes: &[u8]) {
@@ -333,6 +370,7 @@ pub enum SchedulerError {
     /// Flow error.
     #[error("flow error")]
     Flow(#[from] ClientFlowError),
+
     /// Unexpected tag in command completion result.
     ///
     /// The scheduler received a tag that cannot be matched to an active command.
@@ -342,6 +380,43 @@ pub enum SchedulerError {
     /// It's better to halt the execution to avoid damage.
     #[error("unexpected tag in command completion result")]
     UnexpectedTaggedResponse(Tagged<'static>),
+
+    #[error("unexpected BYE response")]
+    UnexpectedByeResponse(Bye<'static>),
+}
+
+pub struct TaskRunner<'a, T: Task> {
+    scheduler: &'a mut Scheduler,
+    handle: TaskHandle<T>,
+}
+
+impl<T: Task> Flow for TaskRunner<'_, T> {
+    type Event = T::Output;
+    type Error = SchedulerError;
+
+    fn enqueue_input(&mut self, bytes: &[u8]) {
+        self.scheduler.enqueue_input(bytes);
+    }
+
+    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
+        loop {
+            match self.scheduler.progress()? {
+                SchedulerEvent::TaskFinished(mut token) => {
+                    if let Some(output) = self.handle.resolve(&mut token) {
+                        break Ok(output);
+                    }
+                }
+                SchedulerEvent::Unsolicited(unsolicited) => {
+                    if let Response::Status(Status::Bye(bye)) = unsolicited {
+                        let err = SchedulerError::UnexpectedByeResponse(bye);
+                        break Err(FlowInterrupt::Error(err));
+                    } else {
+                        println!("unsolicited: {unsolicited:?}");
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Eq)]

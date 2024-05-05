@@ -4,7 +4,7 @@ use imap_flow::{
 };
 use imap_types::response::{Response, Status};
 use tasks::{
-    tasks::{authenticate::AuthenticateTask, capability::CapabilityTask, logout::LogoutTask},
+    tasks::{authenticate::AuthenticateTask, logout::LogoutTask},
     Scheduler, SchedulerEvent,
 };
 use tokio::net::TcpStream;
@@ -16,28 +16,16 @@ async fn main() {
     let client = ClientFlow::new(ClientFlowOptions::default());
     let mut scheduler = Scheduler::new(client);
 
-    let handle1 = scheduler.enqueue_task(CapabilityTask::default());
+    let capabilities = stream
+        .progress(scheduler.capability())
+        .await
+        .unwrap()
+        .unwrap();
 
-    loop {
-        match stream.progress(&mut scheduler).await.unwrap() {
-            SchedulerEvent::TaskFinished(mut token) => {
-                if let Some(capability) = handle1.resolve(&mut token) {
-                    println!("handle1: {capability:?}");
-                    break;
-                }
-            }
-            SchedulerEvent::Unsolicited(unsolicited) => {
-                println!("unsolicited: {unsolicited:?}");
-
-                if let Response::Status(Status::Bye { .. }) = unsolicited {
-                    break;
-                }
-            }
-        }
-    }
+    println!("capabilities: {capabilities:#?}");
 
     let handle2 = scheduler.enqueue_task(AuthenticateTask::plain("alice", "pa²²w0rd", true));
-    let handle3 = scheduler.enqueue_task(LogoutTask::default());
+    let handle3 = scheduler.enqueue_task(LogoutTask::new());
 
     loop {
         match stream.progress(&mut scheduler).await.unwrap() {
