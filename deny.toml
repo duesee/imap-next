@@ -7,4 +7,11 @@ allow-git = [
 ]
 
 [licenses]
-allow = [ "Apache-2.0", "MIT", "Unicode-DFS-2016", "ISC" ]
+allow = [ "Apache-2.0", "MIT", "Unicode-DFS-2016", "ISC", "OpenSSL" ]
+
+[[licenses.clarify]]
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [
+    { path = "LICENSE", hash = 0xbd0eed23 }
+]
