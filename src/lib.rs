@@ -27,7 +27,7 @@ pub trait Flow {
 /// The IMAP flow was interrupted by an event that needs to be handled externally.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FlowInterrupt<E> {
-    /// An IO operation is necessary. Ignoring this might result in a dead lock on IMAP level.
+    /// An IO operation is necessary. Ignoring this might result in a deadlock on IMAP level.
     Io(FlowIo),
     /// An error occurred. Ignoring this might result in an undefined IMAP state.
     Error(E),

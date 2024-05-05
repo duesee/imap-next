@@ -160,8 +160,8 @@ impl<F: Flow> Stream<F> {
             if self.write_buffer.is_empty() {
                 read(&mut self.stream, &mut self.read_buffer).await?;
             } else {
-                // We read and write the stream simultanously because otherwise a
-                // a dead lock between client and server might occur if both sides
+                // We read and write the stream simultaneously because otherwise a
+                // a deadlock between client and server might occur if both sides
                 // would only read or only write.
                 let (read_stream, write_stream) = self.stream.split();
                 select! {
@@ -181,7 +181,7 @@ pub enum StreamError<E> {
     /// The operation failed because the stream is closed.
     ///
     /// We detect this by checking if the read or written byte count is 0. Whether the stream is
-    /// closed indefinitely or temporarily depend on the actual stream implementation.
+    /// closed indefinitely or temporarily depends on the actual stream implementation.
     #[error("Stream was closed")]
     Closed,
     /// An I/O error occurred in the underlying stream.
