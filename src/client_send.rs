@@ -317,7 +317,7 @@ impl ClientSendState {
             // Store the current message, we'll continue later
             self.current_message = Some(current_message);
 
-            // Interrupt the flow for sendng all bytes of current message
+            // Interrupt the flow for sending all bytes of current message
             Err(FlowInterrupt::Io(FlowIo::Output(write_buffer)))
         }
     }

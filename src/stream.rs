@@ -170,6 +170,10 @@ impl Stream {
     pub fn stream_mut(&mut self) -> &mut TcpStream {
         &mut self.stream
     }
+
+    pub fn into_inner(self) -> TcpStream {
+        self.stream
+    }
 }
 
 /// Error during reading into or writing from a stream.

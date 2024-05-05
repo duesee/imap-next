@@ -1,12 +1,12 @@
 use imap_flow::{client::ClientFlow, Flow, FlowInterrupt};
 use imap_types::response::{Response, Status};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::{Scheduler, SchedulerError, SchedulerEvent, Task, TaskHandle};
 
 /// The resolver is a scheduler than manages one task at a time.
 pub struct Resolver {
-    scheduler: Scheduler,
+    pub scheduler: Scheduler,
 }
 
 impl Resolver {
@@ -57,6 +57,9 @@ impl<T: Task> Flow for ResolvingTask<'_, T> {
     fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
         loop {
             match self.resolver.progress()? {
+                SchedulerEvent::GreetingReceived(greeting) => {
+                    debug!("received greeting: {greeting:?}");
+                }
                 SchedulerEvent::TaskFinished(mut token) => {
                     if let Some(output) = self.handle.resolve(&mut token) {
                         break Ok(output);

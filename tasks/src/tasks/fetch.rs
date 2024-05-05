@@ -57,6 +57,24 @@ impl Task for FetchTask {
         if let Data::Fetch { items, seq } = data {
             if let Some(items) = self.output.insert(seq, items) {
                 warn!(seq, ?items, "received duplicate items");
+                // =======
+                //             if self.uid {
+                //                 let uid = items.as_ref().iter().find_map(|item| {
+                //                     if let MessageDataItem::Uid(uid) = item {
+                //                         Some(*uid)
+                //                     } else {
+                //                         None
+                //                     }
+                //                 });
+
+                //                 if let Some(uid) = uid {
+                //                     self.output.insert(uid, items);
+                //                 } else {
+                //                     warn!("cannot get UID of message {seq}, skipping fetch data");
+                //                 }
+                //             } else {
+                //                 self.output.insert(seq, items);
+                // >>>>>>> 7777760 (init client workspace)
             }
 
             None

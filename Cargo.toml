@@ -30,6 +30,7 @@ resolver = "2"
 members = [
     "flow-test",
     "proxy",
+    "client",
     "tag-generator",
     "tasks",
 ]

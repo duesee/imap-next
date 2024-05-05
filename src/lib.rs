@@ -14,6 +14,9 @@ pub mod stream;
 mod tests;
 pub mod types;
 
+// Re-expose codec
+pub use imap_codec;
+
 /// Common sans I/O interface used to implement I/O drivers for types that implement our protocol flows.
 ///
 /// Most notably, [`ClientFlow`](client::ClientFlow) and [`ServerFlow`](server::ServerFlow) both implement

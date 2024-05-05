@@ -16,7 +16,9 @@ use imap_types::{
     auth::AuthenticateData,
     command::{Command, CommandBody},
     core::Tag,
-    response::{Bye, CommandContinuationRequest, Data, Response, Status, StatusBody, Tagged},
+    response::{
+        Bye, CommandContinuationRequest, Data, Greeting, Response, Status, StatusBody, Tagged,
+    },
 };
 use tag_generator::TagGenerator;
 use thiserror::Error;
@@ -66,7 +68,7 @@ pub trait Task: Send + 'static {
     fn process_continuation_request_authenticate(
         &mut self,
         continuation: CommandContinuationRequest<'static>,
-    ) -> Result<AuthenticateData, CommandContinuationRequest<'static>> {
+    ) -> Result<AuthenticateData<'static>, CommandContinuationRequest<'static>> {
         // Default: Don't process command continuation request response (during authenticate)
         Err(continuation)
     }
@@ -85,10 +87,10 @@ pub trait Task: Send + 'static {
 
 /// Scheduler managing enqueued tasks and routing incoming responses to active tasks.
 pub struct Scheduler {
-    flow: ClientFlow,
+    pub flow: ClientFlow,
     waiting_tasks: TaskMap,
     active_tasks: TaskMap,
-    tag_generator: TagGenerator,
+    pub tag_generator: TagGenerator,
 }
 
 impl Scheduler {
@@ -140,8 +142,8 @@ impl Scheduler {
             };
 
             match event {
-                ClientFlowEvent::GreetingReceived { .. } => {
-                    // We have no use for this yet
+                ClientFlowEvent::GreetingReceived { greeting } => {
+                    return Ok(SchedulerEvent::GreetingReceived(greeting));
                 }
                 ClientFlowEvent::CommandSent { handle, .. } => {
                     // This `unwrap` can't fail because `waiting_tasks` contains all unsent `Commands`.
@@ -170,12 +172,19 @@ impl Scheduler {
                     continuation_request,
                 } => {
                     let task = self.active_tasks.get_task_by_handle_mut(handle).unwrap();
-                    if let Err(continuation) =
-                        task.process_continuation_request_authenticate(continuation_request)
-                    {
-                        return Ok(SchedulerEvent::Unsolicited(
-                            Response::CommandContinuationRequest(continuation),
-                        ));
+
+                    let continuation =
+                        task.process_continuation_request_authenticate(continuation_request);
+
+                    match continuation {
+                        Ok(data) => {
+                            self.flow.set_authenticate_data(data).unwrap();
+                        }
+                        Err(continuation) => {
+                            return Ok(SchedulerEvent::Unsolicited(
+                                Response::CommandContinuationRequest(continuation),
+                            ));
+                        }
                     }
                 }
                 ClientFlowEvent::AuthenticateStatusReceived { handle, status, .. } => {
@@ -250,10 +259,30 @@ impl Scheduler {
                         return Ok(SchedulerEvent::TaskFinished(TaskToken { handle, output }));
                     }
                 },
-                ClientFlowEvent::IdleCommandSent { .. } => todo!(),
-                ClientFlowEvent::IdleAccepted { .. } => todo!(),
-                ClientFlowEvent::IdleRejected { .. } => todo!(),
-                ClientFlowEvent::IdleDoneSent { .. } => todo!(),
+                ClientFlowEvent::IdleCommandSent { handle, .. } => {
+                    // This `unwrap` can't fail because `waiting_tasks` contains all unsent `Commands`.
+                    let (handle, tag, task) = self.waiting_tasks.remove_by_handle(handle).unwrap();
+                    self.active_tasks.push_back(handle, tag, task);
+                }
+                ClientFlowEvent::IdleAccepted { .. } => {
+                    println!("IDLE accepted!");
+                }
+                ClientFlowEvent::IdleRejected { handle, status, .. } => {
+                    let body = match status {
+                        Status::Tagged(Tagged { body, .. }) => body,
+                        _ => unreachable!(),
+                    };
+
+                    // This `unwrap` can't fail because `active_tasks` contains all in-progress `Commands`.
+                    let (_, _, task) = self.active_tasks.remove_by_handle(handle).unwrap();
+
+                    let output = Some(task.process_tagged(body));
+
+                    return Ok(SchedulerEvent::TaskFinished(TaskToken { handle, output }));
+                }
+                ClientFlowEvent::IdleDoneSent { .. } => {
+                    println!("IDLE done!");
+                }
             }
         }
     }
@@ -325,6 +354,7 @@ impl TaskMap {
 
 #[derive(Debug)]
 pub enum SchedulerEvent {
+    GreetingReceived(Greeting<'static>),
     TaskFinished(TaskToken),
     Unsolicited(Response<'static>),
 }
@@ -449,7 +479,7 @@ trait TaskAny: Send {
     fn process_continuation_request_authenticate(
         &mut self,
         continuation_request: CommandContinuationRequest<'static>,
-    ) -> Result<AuthenticateData, CommandContinuationRequest<'static>>;
+    ) -> Result<AuthenticateData<'static>, CommandContinuationRequest<'static>>;
 
     fn process_bye(&mut self, bye: Bye<'static>) -> Option<Bye<'static>>;
 
@@ -481,7 +511,7 @@ where
     fn process_continuation_request_authenticate(
         &mut self,
         continuation_request: CommandContinuationRequest<'static>,
-    ) -> Result<AuthenticateData, CommandContinuationRequest<'static>> {
+    ) -> Result<AuthenticateData<'static>, CommandContinuationRequest<'static>> {
         T::process_continuation_request_authenticate(self, continuation_request)
     }
 
