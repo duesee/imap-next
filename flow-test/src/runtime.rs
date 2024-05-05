@@ -45,9 +45,9 @@ impl Runtime {
         match self.timeout {
             None => self.rt.block_on(future),
             Some(timeout) => self.rt.block_on(async {
-                tokio::select! {
+                select! {
                     output = future => output,
-                    () = sleep(timeout) => panic!("Timeout reached"),
+                    () = sleep(timeout) => panic!("exceeded {timeout:?} timeout"),
                 }
             }),
         }
