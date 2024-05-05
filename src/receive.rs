@@ -66,18 +66,16 @@ impl<C> ReceiveState<C> {
         for<'a> C::Message<'a>: IntoBoundedStatic<Static = C::Message<'static>>,
         for<'a> C::Error<'a>: IntoBoundedStatic<Static = C::Error<'static>>,
     {
-        let event = loop {
+        loop {
             match self.next_fragment {
                 NextFragment::Line { seen_bytes_in_line } => {
-                    break self.progress_line(seen_bytes_in_line)?;
+                    break Ok(self.progress_line(seen_bytes_in_line)?);
                 }
                 NextFragment::Literal { length } => {
                     self.progress_literal(length)?;
                 }
             };
-        };
-
-        Ok(event)
+        }
     }
 
     fn progress_line(
