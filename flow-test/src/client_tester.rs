@@ -186,16 +186,13 @@ impl ClientTester {
 #[allow(clippy::large_enum_variant)]
 enum ConnectionState {
     /// The client has established a TCP connection to the server.
-    Connected {
-        stream: Stream<ClientFlow>,
-        client: ClientFlow,
-    },
+    Connected { stream: Stream, client: ClientFlow },
     /// The TCP connection between client and server was dropped.
     Disconnected,
 }
 
 impl ConnectionState {
-    fn connected(&mut self) -> (&mut Stream<ClientFlow>, &mut ClientFlow) {
+    fn connected(&mut self) -> (&mut Stream, &mut ClientFlow) {
         match self {
             ConnectionState::Connected { stream, client } => (stream, client),
             ConnectionState::Disconnected => {

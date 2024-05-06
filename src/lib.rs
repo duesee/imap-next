@@ -24,6 +24,19 @@ pub trait Flow {
     fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>>;
 }
 
+impl<F: Flow> Flow for &mut F {
+    type Event = F::Event;
+    type Error = F::Error;
+
+    fn enqueue_input(&mut self, bytes: &[u8]) {
+        (*self).enqueue_input(bytes);
+    }
+
+    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
+        (*self).progress()
+    }
+}
+
 /// The IMAP flow was interrupted by an event that needs to be handled externally.
 #[must_use = "If the IMAP flow is interrupted the interrupt must be handled. Ignoring this might result in a deadlock on IMAP level"]
 #[derive(Clone, Debug, Eq, PartialEq)]

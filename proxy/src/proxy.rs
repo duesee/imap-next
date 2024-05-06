@@ -116,7 +116,7 @@ impl Proxy<BoundState> {
 
 pub struct ClientAcceptedState {
     client_addr: SocketAddr,
-    client_to_proxy: Stream<ServerFlow>,
+    client_to_proxy: Stream,
 }
 
 impl State for ClientAcceptedState {}
@@ -183,8 +183,8 @@ impl Proxy<ClientAcceptedState> {
 }
 
 pub struct ConnectedState {
-    client_to_proxy: Stream<ServerFlow>,
-    proxy_to_server: Stream<ClientFlow>,
+    client_to_proxy: Stream,
+    proxy_to_server: Stream,
 }
 
 impl State for ConnectedState {}
