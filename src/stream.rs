@@ -1,7 +1,6 @@
 use std::{
     convert::Infallible,
     io::{ErrorKind, Read, Write},
-    marker::PhantomData,
 };
 
 use bytes::{Buf, BufMut, BytesMut};
@@ -19,22 +18,20 @@ use tracing::trace;
 
 use crate::{Flow, FlowInterrupt, FlowIo};
 
-pub struct Stream<F> {
+pub struct Stream {
     stream: TcpStream,
     tls: Option<rustls::Connection>,
     read_buffer: BytesMut,
     write_buffer: BytesMut,
-    _flow: PhantomData<F>,
 }
 
-impl<F> Stream<F> {
+impl Stream {
     pub fn insecure(stream: TcpStream) -> Self {
         Self {
             stream,
             tls: None,
             read_buffer: BytesMut::default(),
             write_buffer: BytesMut::default(),
-            _flow: PhantomData,
         }
     }
 
@@ -71,7 +68,6 @@ impl<F> Stream<F> {
             tls: Some(tls),
             read_buffer: BytesMut::default(),
             write_buffer: BytesMut::default(),
-            _flow: PhantomData,
         }
     }
 
@@ -89,18 +85,10 @@ impl<F> Stream<F> {
         Ok(())
     }
 
-    #[cfg(feature = "expose_stream")]
-    /// Return the underlying stream for debug purposes (or experiments).
-    ///
-    /// Note: Writing to or reading from the stream may introduce
-    /// conflicts with `imap-flow`.
-    pub fn stream_mut(&mut self) -> &mut TcpStream {
-        &mut self.stream
-    }
-}
-
-impl<F: Flow> Stream<F> {
-    pub async fn progress(&mut self, flow: &mut F) -> Result<F::Event, StreamError<F::Error>> {
+    pub async fn progress<F: Flow>(
+        &mut self,
+        mut flow: F,
+    ) -> Result<F::Event, StreamError<F::Error>> {
         let event = loop {
             match &mut self.tls {
                 None => {
@@ -172,6 +160,15 @@ impl<F: Flow> Stream<F> {
         };
 
         Ok(event)
+    }
+
+    #[cfg(feature = "expose_stream")]
+    /// Return the underlying stream for debug purposes (or experiments).
+    ///
+    /// Note: Writing to or reading from the stream may introduce
+    /// conflicts with `imap-flow`.
+    pub fn stream_mut(&mut self) -> &mut TcpStream {
+        &mut self.stream
     }
 }
 

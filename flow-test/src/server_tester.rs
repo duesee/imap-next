@@ -189,20 +189,15 @@ impl ServerTester {
 #[allow(clippy::large_enum_variant)]
 enum ConnectionState {
     // The server has established a TCP connection to the client.
-    Connected {
-        stream: Stream<ServerFlow>,
-    },
+    Connected { stream: Stream },
     // The server has greeted the client.
-    Greeted {
-        stream: Stream<ServerFlow>,
-        server: ServerFlow,
-    },
+    Greeted { stream: Stream, server: ServerFlow },
     // The TCP connection between server and client was dropped.
     Disconnected,
 }
 
 impl ConnectionState {
-    fn greeted(&mut self) -> (&mut Stream<ServerFlow>, &mut ServerFlow) {
+    fn greeted(&mut self) -> (&mut Stream, &mut ServerFlow) {
         match self {
             ConnectionState::Connected { .. } => {
                 panic!("Server has not greeted yet");
