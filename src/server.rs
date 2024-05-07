@@ -18,7 +18,7 @@ use crate::{
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveError, ReceiveEvent, ReceiveState},
     server_receive::{NextExpectedMessage, ServerReceiveState},
-    server_send::{SendResponseEvent, SendResponseState},
+    server_send::{ServerSendEvent, ServerSendState},
     types::CommandAuthenticate,
     Flow, FlowInterrupt,
 };
@@ -67,7 +67,7 @@ impl Default for ServerFlowOptions {
 pub struct ServerFlow {
     options: ServerFlowOptions,
     handle_generator: HandleGenerator<ServerFlowResponseHandle>,
-    send_response_state: SendResponseState,
+    send_state: ServerSendState,
     receive_state: ServerReceiveState,
 }
 
@@ -95,10 +95,10 @@ impl Flow for ServerFlow {
 
 impl ServerFlow {
     pub fn new(options: ServerFlowOptions, greeting: Greeting<'static>) -> Self {
-        let mut send_response_state =
-            SendResponseState::new(GreetingCodec::default(), ResponseCodec::default());
+        let mut send_state =
+            ServerSendState::new(GreetingCodec::default(), ResponseCodec::default());
 
-        send_response_state.enqueue_greeting(greeting);
+        send_state.enqueue_greeting(greeting);
 
         let receive_state = ServerReceiveState::Command(ReceiveState::new(
             CommandCodec::default(),
@@ -109,7 +109,7 @@ impl ServerFlow {
         Self {
             options,
             handle_generator: HANDLE_GENERATOR_GENERATOR.generate(),
-            send_response_state,
+            send_state,
             receive_state,
         }
     }
@@ -131,7 +131,7 @@ impl ServerFlow {
     /// enqueued.
     pub fn enqueue_data(&mut self, data: Data<'static>) -> ServerFlowResponseHandle {
         let handle = self.handle_generator.generate();
-        self.send_response_state
+        self.send_state
             .enqueue_response(Some(handle), Response::Data(data));
         handle
     }
@@ -143,7 +143,7 @@ impl ServerFlow {
     /// enqueued.
     pub fn enqueue_status(&mut self, status: Status<'static>) -> ServerFlowResponseHandle {
         let handle = self.handle_generator.generate();
-        self.send_response_state
+        self.send_state
             .enqueue_response(Some(handle), Response::Status(status));
         handle
     }
@@ -158,7 +158,7 @@ impl ServerFlow {
         continuation_request: CommandContinuationRequest<'static>,
     ) -> ServerFlowResponseHandle {
         let handle = self.handle_generator.generate();
-        self.send_response_state.enqueue_response(
+        self.send_state.enqueue_response(
             Some(handle),
             Response::CommandContinuationRequest(continuation_request),
         );
@@ -178,19 +178,19 @@ impl ServerFlow {
     }
 
     fn progress_send(&mut self) -> Result<Option<ServerFlowEvent>, FlowInterrupt<ServerFlowError>> {
-        match self.send_response_state.progress() {
-            Ok(Some(SendResponseEvent::Greeting { greeting })) => {
+        match self.send_state.progress() {
+            Ok(Some(ServerSendEvent::Greeting { greeting })) => {
                 // The initial greeting was sucessfully sent, inform the caller
                 Ok(Some(ServerFlowEvent::GreetingSent { greeting }))
             }
-            Ok(Some(SendResponseEvent::Response {
+            Ok(Some(ServerSendEvent::Response {
                 handle: Some(handle),
                 response,
             })) => {
                 // A response was sucessfully sent, inform the caller
                 Ok(Some(ServerFlowEvent::ResponseSent { handle, response }))
             }
-            Ok(Some(SendResponseEvent::Response { handle: None, .. })) => {
+            Ok(Some(ServerSendEvent::Response { handle: None, .. })) => {
                 // An internally created response was sent, don't inform the caller
                 Ok(None)
             }
@@ -260,7 +260,7 @@ impl ServerFlow {
                                         self.options.literal_reject_text.clone(),
                                     )
                                     .unwrap();
-                                    self.send_response_state
+                                    self.send_state
                                         .enqueue_response(None, Response::Status(status));
 
                                     let discarded_bytes = state.discard_message();
@@ -298,7 +298,7 @@ impl ServerFlow {
                                         self.options.literal_accept_text.clone(),
                                     )
                                     .unwrap();
-                                    self.send_response_state.enqueue_response(
+                                    self.send_state.enqueue_response(
                                         None,
                                         Response::CommandContinuationRequest(cont),
                                     );
