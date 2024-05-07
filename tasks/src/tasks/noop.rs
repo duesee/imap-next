@@ -7,14 +7,8 @@ use crate::{SchedulerError, Task};
 
 pub type NoOpTaskOutput = ();
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct NoOpTask;
-
-impl NoOpTask {
-    pub fn new() -> Self {
-        Self
-    }
-}
 
 impl Task for NoOpTask {
     type Output = Result<NoOpTaskOutput, SchedulerError>;
@@ -29,5 +23,11 @@ impl Task for NoOpTask {
             StatusKind::No => Err(SchedulerError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(SchedulerError::UnexpectedBadResponse(status_body)),
         }
+    }
+}
+
+impl NoOpTask {
+    pub fn new() -> Self {
+        Default::default()
     }
 }

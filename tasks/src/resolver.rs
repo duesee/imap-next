@@ -1,27 +1,15 @@
 use std::any::Any;
 
 use imap_flow::{client::ClientFlowCommandHandle, Flow, FlowInterrupt};
-use imap_types::{
-    bounded_static::IntoBoundedStatic,
-    core::{IString, NString},
-    response::{Response, Status},
-};
+use imap_types::response::{Response, Status};
 
 use crate::{
     tasks::{
-        authenticate::AuthenticateTask, capability::CapabilityTask, id::IdTask, logout::LogoutTask,
+        authenticate::AuthenticateTask, capability::CapabilityTask, logout::LogoutTask,
         noop::NoOpTask,
     },
     Scheduler, SchedulerError, SchedulerEvent, Task, TaskHandle,
 };
-
-pub struct TaskResolved(Box<dyn Any + Send>);
-
-impl TaskResolved {
-    pub fn resolve<T: Task>(self, _phantom: TaskHandle<T>) -> T::Output {
-        *self.0.downcast::<T::Output>().unwrap()
-    }
-}
 
 pub struct Resolver {
     scheduler: Scheduler,
@@ -88,35 +76,19 @@ impl Resolver {
         self.enqueue_task(AuthenticateTask::new_plain(login, passwd, true))
     }
 
-    pub fn authenticate_xoauth2(
-        &mut self,
-        user: &str,
-        token: &str,
-    ) -> TaskHandle<AuthenticateTask> {
-        self.enqueue_task(AuthenticateTask::new_xoauth2(user, token, true))
-    }
-
-    pub fn authenticate_oauthbearer(
-        &mut self,
-        a: &str,
-        host: &str,
-        port: u16,
-        token: &str,
-    ) -> TaskHandle<AuthenticateTask> {
-        self.enqueue_task(AuthenticateTask::new_oauthbearer(
-            a, host, port, token, true,
-        ))
-    }
-
-    pub fn id(&mut self, params: Vec<(IString<'_>, NString<'_>)>) -> TaskHandle<IdTask> {
-        self.enqueue_task(IdTask::new(params.into_static()))
-    }
-
     pub fn logout(&mut self) -> TaskHandle<LogoutTask> {
         self.enqueue_task(LogoutTask::new())
     }
 
     pub fn noop(&mut self) -> TaskHandle<NoOpTask> {
         self.enqueue_task(NoOpTask::new())
+    }
+}
+
+pub struct TaskResolved(Box<dyn Any + Send>);
+
+impl TaskResolved {
+    pub fn resolve<T: Task>(self, _phantom: TaskHandle<T>) -> T::Output {
+        *self.0.downcast::<T::Output>().unwrap()
     }
 }

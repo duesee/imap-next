@@ -14,12 +14,6 @@ pub struct CapabilityTask {
     output: Option<Capabilities>,
 }
 
-impl CapabilityTask {
-    pub fn new() -> Self {
-        Default::default()
-    }
-}
-
 impl Task for CapabilityTask {
     type Output = Result<Capabilities, SchedulerError>;
 
@@ -63,5 +57,11 @@ impl Task for CapabilityTask {
             StatusKind::No => Err(SchedulerError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(SchedulerError::UnexpectedBadResponse(status_body)),
         }
+    }
+}
+
+impl CapabilityTask {
+    pub fn new() -> Self {
+        Default::default()
     }
 }
