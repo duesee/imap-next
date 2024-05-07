@@ -2,7 +2,7 @@ use std::fmt::{Debug, Formatter};
 
 use imap_codec::{
     decode::{GreetingDecodeError, ResponseDecodeError},
-    AuthenticateDataCodec, CommandCodec, GreetingCodec, IdleDoneCodec, ResponseCodec,
+    AuthenticateDataCodec, CommandCodec, GreetingCodec, IdleDoneCodec,
 };
 use imap_types::{
     auth::AuthenticateData,
@@ -13,6 +13,7 @@ use imap_types::{
 use thiserror::Error;
 
 use crate::{
+    client_receive::ClientReceiveState,
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveError, ReceiveEvent, ReceiveState},
     send_command::{SendCommandEvent, SendCommandState, SendCommandTermination},
@@ -292,27 +293,6 @@ impl ClientFlow {
 
     pub fn set_idle_done(&mut self) -> Option<ClientFlowCommandHandle> {
         self.send_command_state.set_idle_done()
-    }
-}
-
-enum ClientReceiveState {
-    Greeting(ReceiveState<GreetingCodec>),
-    Response(ReceiveState<ResponseCodec>),
-    // This state is set only temporarily during `ClientReceiveState::change_state`
-    Dummy,
-}
-
-impl ClientReceiveState {
-    fn change_state(&mut self) {
-        // NOTE: This function MUST NOT panic. Otherwise the dummy state will remain indefinitely.
-        let old_state = std::mem::replace(self, ClientReceiveState::Dummy);
-        let codec = ResponseCodec::default();
-        let new_state = Self::Response(match old_state {
-            Self::Greeting(state) => state.change_codec(codec),
-            Self::Response(state) => state,
-            Self::Dummy => unreachable!(),
-        });
-        *self = new_state;
     }
 }
 
