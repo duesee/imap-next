@@ -15,17 +15,17 @@ use tracing::warn;
 
 use crate::{client::ClientFlowCommandHandle, types::CommandAuthenticate, FlowInterrupt, FlowIo};
 
-pub struct SendCommandState {
+pub struct ClientSendState {
     command_codec: CommandCodec,
     authenticate_data_codec: AuthenticateDataCodec,
     idle_done_codec: IdleDoneCodec,
-    /// FIFO queue for commands that should be sent next.
-    queued_commands: VecDeque<QueuedCommand>,
-    /// The command that is currently being sent.
-    current_command: Option<CurrentCommand>,
+    /// FIFO queue for messages that should be sent next.
+    queued_messages: VecDeque<QueuedMessage>,
+    /// The message that is currently being sent.
+    current_message: Option<CurrentMessage>,
 }
 
-impl SendCommandState {
+impl ClientSendState {
     pub fn new(
         command_codec: CommandCodec,
         authenticate_data_codec: AuthenticateDataCodec,
@@ -35,23 +35,23 @@ impl SendCommandState {
             command_codec,
             authenticate_data_codec,
             idle_done_codec,
-            queued_commands: VecDeque::new(),
-            current_command: None,
+            queued_messages: VecDeque::new(),
+            current_message: None,
         }
     }
 
-    pub fn enqueue(&mut self, handle: ClientFlowCommandHandle, command: Command<'static>) {
-        self.queued_commands
-            .push_back(QueuedCommand { handle, command });
+    pub fn enqueue_command(&mut self, handle: ClientFlowCommandHandle, command: Command<'static>) {
+        self.queued_messages
+            .push_back(QueuedMessage { handle, command });
     }
 
-    /// Terminates the current command depending on the received status.
-    pub fn maybe_remove(&mut self, status: &Status) -> Option<SendCommandTermination> {
+    /// Terminates the current message depending on the received status.
+    pub fn maybe_terminate(&mut self, status: &Status) -> Option<ClientSendTermination> {
         // TODO: Do we want more checks on the state? Was idle already accepted? Does the command even has a literal? etc.
-        // If we reach one of the return statements, the current command will be removed
-        let current_command = self.current_command.take()?;
-        self.current_command = Some(match current_command {
-            CurrentCommand::Command(state) => {
+        // If we reach one of the return statements, the current message will be removed
+        let current_message = self.current_message.take()?;
+        self.current_message = Some(match current_message {
+            CurrentMessage::Command(state) => {
                 // Check if status matches the current command
                 if let Status::Tagged(Tagged {
                     tag,
@@ -61,16 +61,16 @@ impl SendCommandState {
                 {
                     if *kind == StatusKind::Bad && tag == &state.command.tag {
                         // Terminate command because literal was rejected
-                        return Some(SendCommandTermination::LiteralRejected {
+                        return Some(ClientSendTermination::LiteralRejected {
                             handle: state.handle,
                             command: state.command,
                         });
                     }
                 }
 
-                CurrentCommand::Command(state)
+                CurrentMessage::Command(state)
             }
-            CurrentCommand::Authenticate(state) => {
+            CurrentMessage::Authenticate(state) => {
                 // Check if status matches the current authenticate command
                 if let Status::Tagged(Tagged {
                     tag,
@@ -82,14 +82,14 @@ impl SendCommandState {
                         match kind {
                             StatusKind::Ok => {
                                 // Terminate authenticate command because it was accepted
-                                return Some(SendCommandTermination::AuthenticateAccepted {
+                                return Some(ClientSendTermination::AuthenticateAccepted {
                                     handle: state.handle,
                                     command_authenticate: state.command_authenticate,
                                 });
                             }
                             StatusKind::No | StatusKind::Bad => {
                                 // Terminate authenticate command because it was rejected
-                                return Some(SendCommandTermination::AuthenticateRejected {
+                                return Some(ClientSendTermination::AuthenticateRejected {
                                     handle: state.handle,
                                     command_authenticate: state.command_authenticate,
                                 });
@@ -98,9 +98,9 @@ impl SendCommandState {
                     }
                 }
 
-                CurrentCommand::Authenticate(state)
+                CurrentMessage::Authenticate(state)
             }
-            CurrentCommand::Idle(state) => {
+            CurrentMessage::Idle(state) => {
                 // Check if status matches the current idle command
                 if let Status::Tagged(Tagged {
                     tag,
@@ -115,13 +115,13 @@ impl SendCommandState {
                         }
 
                         // Terminate idle command because it was rejected
-                        return Some(SendCommandTermination::IdleRejected {
+                        return Some(ClientSendTermination::IdleRejected {
                             handle: state.handle,
                         });
                     }
                 }
 
-                CurrentCommand::Idle(state)
+                CurrentMessage::Idle(state)
             }
         });
 
@@ -131,20 +131,20 @@ impl SendCommandState {
     /// Handles the received continuation request for a literal.
     pub fn literal_continue(&mut self) -> bool {
         // Check whether in correct state
-        let Some(current_command) = self.current_command.take() else {
+        let Some(current_message) = self.current_message.take() else {
             return false;
         };
-        let CurrentCommand::Command(state) = current_command else {
-            self.current_command = Some(current_command);
+        let CurrentMessage::Command(state) = current_message else {
+            self.current_message = Some(current_message);
             return false;
         };
         let CommandActivity::WaitingForLiteralAccepted { limbo_literal } = state.activity else {
-            self.current_command = Some(CurrentCommand::Command(state));
+            self.current_message = Some(CurrentMessage::Command(state));
             return false;
         };
 
         // Change state
-        self.current_command = Some(CurrentCommand::Command(CommandState {
+        self.current_message = Some(CurrentMessage::Command(CommandState {
             activity: CommandActivity::PushingFragments {
                 accepted_literal: Some(limbo_literal),
             },
@@ -157,18 +157,18 @@ impl SendCommandState {
     /// Handles the received continuation request for an authenticate data.
     pub fn authenticate_continue(&mut self) -> Option<ClientFlowCommandHandle> {
         // Check whether in correct state
-        let current_command = self.current_command.take()?;
-        let CurrentCommand::Authenticate(state) = current_command else {
-            self.current_command = Some(current_command);
+        let current_message = self.current_message.take()?;
+        let CurrentMessage::Authenticate(state) = current_message else {
+            self.current_message = Some(current_message);
             return None;
         };
         let AuthenticateActivity::WaitingForAuthenticateResponse = state.activity else {
-            self.current_command = Some(CurrentCommand::Authenticate(state));
+            self.current_message = Some(CurrentMessage::Authenticate(state));
             return None;
         };
 
         // Change state
-        self.current_command = Some(CurrentCommand::Authenticate(AuthenticateState {
+        self.current_message = Some(CurrentMessage::Authenticate(AuthenticateState {
             activity: AuthenticateActivity::WaitingForAuthenticateDataSet,
             ..state
         }));
@@ -182,15 +182,15 @@ impl SendCommandState {
         authenticate_data: AuthenticateData<'static>,
     ) -> Result<ClientFlowCommandHandle, AuthenticateData<'static>> {
         // Check whether in correct state
-        let Some(current_command) = self.current_command.take() else {
+        let Some(current_message) = self.current_message.take() else {
             return Err(authenticate_data);
         };
-        let CurrentCommand::Authenticate(state) = current_command else {
-            self.current_command = Some(current_command);
+        let CurrentMessage::Authenticate(state) = current_message else {
+            self.current_message = Some(current_message);
             return Err(authenticate_data);
         };
         let AuthenticateActivity::WaitingForAuthenticateDataSet = state.activity else {
-            self.current_command = Some(CurrentCommand::Authenticate(state));
+            self.current_message = Some(CurrentMessage::Authenticate(state));
             return Err(authenticate_data);
         };
 
@@ -206,7 +206,7 @@ impl SendCommandState {
         assert!(fragments.next().is_none());
 
         // Change state
-        self.current_command = Some(CurrentCommand::Authenticate(AuthenticateState {
+        self.current_message = Some(CurrentMessage::Authenticate(AuthenticateState {
             activity: AuthenticateActivity::PushingAuthenticateData { authenticate_data },
             ..state
         }));
@@ -217,18 +217,18 @@ impl SendCommandState {
     /// Handles the received continuation request for the idle done.
     pub fn idle_continue(&mut self) -> Option<ClientFlowCommandHandle> {
         // Check whether in correct state
-        let current_command = self.current_command.take()?;
-        let CurrentCommand::Idle(state) = current_command else {
-            self.current_command = Some(current_command);
+        let current_message = self.current_message.take()?;
+        let CurrentMessage::Idle(state) = current_message else {
+            self.current_message = Some(current_message);
             return None;
         };
         let IdleActivity::WaitingForIdleResponse = state.activity else {
-            self.current_command = Some(CurrentCommand::Idle(state));
+            self.current_message = Some(CurrentMessage::Idle(state));
             return None;
         };
 
         // Change state
-        self.current_command = Some(CurrentCommand::Idle(IdleState {
+        self.current_message = Some(CurrentMessage::Idle(IdleState {
             activity: IdleActivity::WaitingForIdleDoneSet,
             ..state
         }));
@@ -239,13 +239,13 @@ impl SendCommandState {
     /// Sends the requested idle done to the server.
     pub fn set_idle_done(&mut self) -> Option<ClientFlowCommandHandle> {
         // Check whether in correct state
-        let current_command = self.current_command.take()?;
-        let CurrentCommand::Idle(state) = current_command else {
-            self.current_command = Some(current_command);
+        let current_message = self.current_message.take()?;
+        let CurrentMessage::Idle(state) = current_message else {
+            self.current_message = Some(current_message);
             return None;
         };
         let IdleActivity::WaitingForIdleDoneSet = state.activity else {
-            self.current_command = Some(CurrentCommand::Idle(state));
+            self.current_message = Some(CurrentMessage::Idle(state));
             return None;
         };
 
@@ -262,7 +262,7 @@ impl SendCommandState {
 
         // Change state
         let handle = state.handle;
-        self.current_command = Some(CurrentCommand::Idle(IdleState {
+        self.current_message = Some(CurrentMessage::Idle(IdleState {
             activity: IdleActivity::PushingIdleDone { idle_done },
             ..state
         }));
@@ -270,68 +270,68 @@ impl SendCommandState {
         Some(handle)
     }
 
-    pub fn progress(&mut self) -> Result<Option<SendCommandEvent>, FlowInterrupt<Infallible>> {
-        let current_command = match self.current_command.take() {
-            Some(current_command) => {
-                // We are currently sending a command but the sending process was aborted for one
+    pub fn progress(&mut self) -> Result<Option<ClientSendEvent>, FlowInterrupt<Infallible>> {
+        let current_message = match self.current_message.take() {
+            Some(current_message) => {
+                // We are currently sending a message but the sending process was aborted for one
                 // of these reasons:
                 // - The flow was interrupted
                 // - The server must send a continuation request or a status
                 // - The client flow user must provide more data
                 // Continue the sending process.
-                current_command
+                current_message
             }
             None => {
-                let Some(queued_command) = self.queued_commands.pop_front() else {
-                    // There is currently no command that needs to be sent
+                let Some(queued_message) = self.queued_messages.pop_front() else {
+                    // There is currently no message that needs to be sent
                     return Ok(None);
                 };
 
-                queued_command.start(&self.command_codec)
+                queued_message.start(&self.command_codec)
             }
         };
 
-        // Creates a buffer for writing the current command
+        // Creates a buffer for writing the current message
         let mut write_buffer = Vec::new();
 
-        // Push as many bytes of the command as possible to the buffer
-        let current_command = current_command.push_to_buffer(&mut write_buffer);
+        // Push as many bytes of the message as possible to the buffer
+        let current_message = current_message.push_to_buffer(&mut write_buffer);
 
         if write_buffer.is_empty() {
-            // Inform the state of the current command that all bytes are sent
-            match current_command.finish_sending() {
+            // Inform the state of the current message that all bytes are sent
+            match current_message.finish_sending() {
                 FinishSendingResult::Uncompleted {
-                    state: current_command,
+                    state: current_message,
                     event,
                 } => {
-                    // Command is not finished yet
-                    self.current_command = Some(current_command);
+                    // Message is not finished yet
+                    self.current_message = Some(current_message);
                     Ok(event)
                 }
                 FinishSendingResult::Completed { event } => {
-                    // Command was sent completely
+                    // Message was sent completely
                     Ok(Some(event))
                 }
             }
         } else {
-            // Store the current command, we'll continue later
-            self.current_command = Some(current_command);
+            // Store the current message, we'll continue later
+            self.current_message = Some(current_message);
 
-            // Interrupt the flow for sendng all bytes of current command
+            // Interrupt the flow for sendng all bytes of current message
             Err(FlowInterrupt::Io(FlowIo::Output(write_buffer)))
         }
     }
 }
 
-/// Queued (and not sent yet) command.
-struct QueuedCommand {
+/// Queued (and not sent yet) message.
+struct QueuedMessage {
     handle: ClientFlowCommandHandle,
     command: Command<'static>,
 }
 
-impl QueuedCommand {
-    /// Start the sending process for this command.
-    fn start(self, codec: &CommandCodec) -> CurrentCommand {
+impl QueuedMessage {
+    /// Start the sending process for this message.
+    fn start(self, codec: &CommandCodec) -> CurrentMessage {
         let handle = self.handle;
         let command = self.command;
         let mut fragments = codec.encode(&command);
@@ -348,7 +348,7 @@ impl QueuedCommand {
                 };
                 assert!(fragments.next().is_none());
 
-                CurrentCommand::Authenticate(AuthenticateState {
+                CurrentMessage::Authenticate(AuthenticateState {
                     handle,
                     command_authenticate: CommandAuthenticate {
                         tag,
@@ -365,13 +365,13 @@ impl QueuedCommand {
                 };
                 assert!(fragments.next().is_none());
 
-                CurrentCommand::Idle(IdleState {
+                CurrentMessage::Idle(IdleState {
                     handle,
                     tag,
                     activity: IdleActivity::PushingIdle { idle },
                 })
             }
-            body => CurrentCommand::Command(CommandState {
+            body => CurrentMessage::Command(CommandState {
                 handle,
                 command: Command { tag, body },
                 fragments: fragments.collect(),
@@ -383,8 +383,8 @@ impl QueuedCommand {
     }
 }
 
-/// Currently being sent command.
-enum CurrentCommand {
+/// Currently being sent message.
+enum CurrentMessage {
     /// Sending state of regular command.
     Command(CommandState),
     /// Sending state of authenticate command.
@@ -393,8 +393,8 @@ enum CurrentCommand {
     Idle(IdleState),
 }
 
-impl CurrentCommand {
-    /// Pushes as many bytes as possible from the command to the buffer.
+impl CurrentMessage {
+    /// Pushes as many bytes as possible from the message to the buffer.
     fn push_to_buffer(self, write_buffer: &mut Vec<u8>) -> Self {
         match self {
             Self::Command(state) => Self::Command(state.push_to_buffer(write_buffer)),
@@ -413,19 +413,19 @@ impl CurrentCommand {
     }
 }
 
-/// Updated command state after sending all bytes, see `finish_sending`.
+/// Updated message state after sending all bytes, see `finish_sending`.
 enum FinishSendingResult<S> {
-    /// Command not finished yet.
+    /// Message not finished yet.
     Uncompleted {
-        /// Updated command state.
+        /// Updated message state.
         state: S,
         /// Event that needs to be returned by `progress`.
-        event: Option<SendCommandEvent>,
+        event: Option<ClientSendEvent>,
     },
-    /// Command sent completely.
+    /// Message sent completely.
     Completed {
         /// Event that needs to be returned by `progress`.
-        event: SendCommandEvent,
+        event: ClientSendEvent,
     },
 }
 
@@ -507,7 +507,7 @@ impl CommandState {
                     event: None,
                 },
                 None => FinishSendingResult::Completed {
-                    event: SendCommandEvent::Command {
+                    event: ClientSendEvent::Command {
                         handle: self.handle,
                         command: self.command,
                     },
@@ -570,7 +570,7 @@ impl AuthenticateState {
                     activity: AuthenticateActivity::WaitingForAuthenticateResponse,
                     ..self
                 },
-                event: Some(SendCommandEvent::CommandAuthenticate {
+                event: Some(ClientSendEvent::Authenticate {
                     handle: self.handle,
                 }),
             },
@@ -639,12 +639,12 @@ impl IdleState {
                     activity: IdleActivity::WaitingForIdleResponse,
                     ..self
                 },
-                event: Some(SendCommandEvent::CommandIdle {
+                event: Some(ClientSendEvent::Idle {
                     handle: self.handle,
                 }),
             },
             IdleActivity::WaitingForIdleDoneSent => FinishSendingResult::Completed {
-                event: SendCommandEvent::IdleDone {
+                event: ClientSendEvent::IdleDone {
                     handle: self.handle,
                 },
             },
@@ -674,16 +674,16 @@ enum IdleActivity {
     WaitingForIdleDoneSent,
 }
 
-/// Command was sent.
-pub enum SendCommandEvent {
+/// A message was sent.
+pub enum ClientSendEvent {
     Command {
         handle: ClientFlowCommandHandle,
         command: Command<'static>,
     },
-    CommandAuthenticate {
+    Authenticate {
         handle: ClientFlowCommandHandle,
     },
-    CommandIdle {
+    Idle {
         handle: ClientFlowCommandHandle,
     },
     IdleDone {
@@ -691,8 +691,8 @@ pub enum SendCommandEvent {
     },
 }
 
-/// Command was terminated via `maybe_terminate`.
-pub enum SendCommandTermination {
+/// Message was terminated via [`ClientSendState::maybe_terminate`].
+pub enum ClientSendTermination {
     /// Command was terminated because its literal was rejected by the server.
     LiteralRejected {
         handle: ClientFlowCommandHandle,

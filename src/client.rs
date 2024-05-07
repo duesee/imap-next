@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::{
     client_receive::ClientReceiveState,
-    client_send::{SendCommandEvent, SendCommandState, SendCommandTermination},
+    client_send::{ClientSendEvent, ClientSendState, ClientSendTermination},
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveError, ReceiveEvent, ReceiveState},
     types::CommandAuthenticate,
@@ -42,7 +42,7 @@ impl Default for ClientFlowOptions {
 
 pub struct ClientFlow {
     handle_generator: HandleGenerator<ClientFlowCommandHandle>,
-    send_command_state: SendCommandState,
+    send_state: ClientSendState,
     receive_state: ClientReceiveState,
 }
 
@@ -69,7 +69,7 @@ impl Flow for ClientFlow {
 
 impl ClientFlow {
     pub fn new(options: ClientFlowOptions) -> Self {
-        let send_command_state = SendCommandState::new(
+        let send_state = ClientSendState::new(
             CommandCodec::default(),
             AuthenticateDataCodec::default(),
             IdleDoneCodec::default(),
@@ -83,7 +83,7 @@ impl ClientFlow {
 
         Self {
             handle_generator: HANDLE_GENERATOR_GENERATOR.generate(),
-            send_command_state,
+            send_state,
             receive_state,
         }
     }
@@ -103,7 +103,7 @@ impl ClientFlow {
     /// enqueued.
     pub fn enqueue_command(&mut self, command: Command<'static>) -> ClientFlowCommandHandle {
         let handle = self.handle_generator.generate();
-        self.send_command_state.enqueue(handle, command);
+        self.send_state.enqueue_command(handle, command);
         handle
     }
 
@@ -125,17 +125,17 @@ impl ClientFlow {
             return Ok(None);
         }
 
-        match self.send_command_state.progress() {
-            Ok(Some(SendCommandEvent::Command { handle, command })) => {
+        match self.send_state.progress() {
+            Ok(Some(ClientSendEvent::Command { handle, command })) => {
                 Ok(Some(ClientFlowEvent::CommandSent { handle, command }))
             }
-            Ok(Some(SendCommandEvent::CommandAuthenticate { handle })) => {
+            Ok(Some(ClientSendEvent::Authenticate { handle })) => {
                 Ok(Some(ClientFlowEvent::AuthenticateStarted { handle }))
             }
-            Ok(Some(SendCommandEvent::CommandIdle { handle })) => {
+            Ok(Some(ClientSendEvent::Idle { handle })) => {
                 Ok(Some(ClientFlowEvent::IdleCommandSent { handle }))
             }
-            Ok(Some(SendCommandEvent::IdleDone { handle })) => {
+            Ok(Some(ClientSendEvent::IdleDone { handle })) => {
                 Ok(Some(ClientFlowEvent::IdleDoneSent { handle }))
             }
             Ok(None) => Ok(None),
@@ -214,21 +214,21 @@ impl ClientFlow {
                     match response {
                         Response::Status(status) => {
                             let event = if let Some(finish_result) =
-                                self.send_command_state.maybe_remove(&status)
+                                self.send_state.maybe_terminate(&status)
                             {
                                 match finish_result {
-                                    SendCommandTermination::LiteralRejected { handle, command } => {
+                                    ClientSendTermination::LiteralRejected { handle, command } => {
                                         ClientFlowEvent::CommandRejected {
                                             handle,
                                             command,
                                             status,
                                         }
                                     }
-                                    SendCommandTermination::AuthenticateAccepted {
+                                    ClientSendTermination::AuthenticateAccepted {
                                         handle,
                                         command_authenticate,
                                     }
-                                    | SendCommandTermination::AuthenticateRejected {
+                                    | ClientSendTermination::AuthenticateRejected {
                                         handle,
                                         command_authenticate,
                                     } => ClientFlowEvent::AuthenticateStatusReceived {
@@ -236,7 +236,7 @@ impl ClientFlow {
                                         command_authenticate,
                                         status,
                                     },
-                                    SendCommandTermination::IdleRejected { handle } => {
+                                    ClientSendTermination::IdleRejected { handle } => {
                                         ClientFlowEvent::IdleRejected { handle, status }
                                     }
                                 }
@@ -248,20 +248,19 @@ impl ClientFlow {
                         }
                         Response::Data(data) => break Some(ClientFlowEvent::DataReceived { data }),
                         Response::CommandContinuationRequest(continuation_request) => {
-                            if self.send_command_state.literal_continue() {
-                                // We received a continuation request that was necessary for sending a command.
-                                // So we abort receiving responses for now and continue with sending commands.
+                            if self.send_state.literal_continue() {
+                                // We received a continuation request that was necessary for
+                                // sending a command. So we abort receiving responses for now
+                                // and continue with sending commands.
                                 break None;
-                            } else if let Some(handle) =
-                                self.send_command_state.authenticate_continue()
-                            {
+                            } else if let Some(handle) = self.send_state.authenticate_continue() {
                                 break Some(
                                     ClientFlowEvent::AuthenticateContinuationRequestReceived {
                                         handle,
                                         continuation_request,
                                     },
                                 );
-                            } else if let Some(handle) = self.send_command_state.idle_continue() {
+                            } else if let Some(handle) = self.send_state.idle_continue() {
                                 break Some(ClientFlowEvent::IdleAccepted {
                                     handle,
                                     continuation_request,
@@ -287,12 +286,11 @@ impl ClientFlow {
         &mut self,
         authenticate_data: AuthenticateData<'static>,
     ) -> Result<ClientFlowCommandHandle, AuthenticateData<'static>> {
-        self.send_command_state
-            .set_authenticate_data(authenticate_data)
+        self.send_state.set_authenticate_data(authenticate_data)
     }
 
     pub fn set_idle_done(&mut self) -> Option<ClientFlowCommandHandle> {
-        self.send_command_state.set_idle_done()
+        self.send_state.set_idle_done()
     }
 }
 
