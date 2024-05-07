@@ -13,16 +13,29 @@ use imap_types::{
     extensions::idle::IdleDone,
     response::{Code, Status},
 };
-use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore, ServerName};
+use once_cell::sync::Lazy;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_rustls::{TlsAcceptor, TlsConnector};
+use tokio_rustls::{
+    rustls::{pki_types::ServerName, ClientConfig, RootCertStore, ServerConfig},
+    TlsAcceptor, TlsConnector,
+};
 use tracing::{error, info, trace};
 
 use crate::{
     config::{Bind, Connect, Identity, Service},
     util::{self, ControlFlow, IdentityError},
 };
+
+static ROOT_CERT_STORE: Lazy<RootCertStore> = Lazy::new(|| {
+    let mut root_store = RootCertStore::empty();
+
+    for cert in rustls_native_certs::load_native_certs().unwrap() {
+        root_store.add(cert).unwrap();
+    }
+
+    root_store
+});
 
 const LITERAL_ACCEPT_TEXT: &str = "proxy: Literal accepted by proxy";
 const LITERAL_REJECT_TEXT: &str = "proxy: Literal rejected by proxy";
@@ -35,7 +48,7 @@ pub enum ProxyError {
     #[error(transparent)]
     Identity(#[from] IdentityError),
     #[error(transparent)]
-    Tls(#[from] rustls::Error),
+    Tls(#[from] tokio_rustls::rustls::Error),
 }
 
 pub trait State: Send + 'static {}
@@ -84,8 +97,7 @@ impl Proxy<BoundState> {
                         }
                     };
 
-                    let mut config = rustls::ServerConfig::builder()
-                        .with_safe_defaults()
+                    let mut config = ServerConfig::builder()
                         .with_no_client_auth()
                         // Note: The name is misleading. We provide the full chain here.
                         .with_single_cert(certificate_chain, leaf_key)?;
@@ -134,25 +146,8 @@ impl Proxy<ClientAcceptedState> {
         let proxy_to_server = match self.service.connect {
             Connect::Tls { ref host, .. } => {
                 let config = {
-                    let root_store = {
-                        let mut root_store = RootCertStore::empty();
-
-                        root_store.add_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.iter().map(
-                            |ta| {
-                                OwnedTrustAnchor::from_subject_spki_name_constraints(
-                                    ta.subject,
-                                    ta.spki,
-                                    ta.name_constraints,
-                                )
-                            },
-                        ));
-
-                        root_store
-                    };
-
                     let mut config = ClientConfig::builder()
-                        .with_safe_defaults()
-                        .with_root_certificates(root_store)
+                        .with_root_certificates(ROOT_CERT_STORE.clone())
                         .with_no_client_auth();
 
                     // See <https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml#alpn-protocol-ids>
@@ -162,7 +157,7 @@ impl Proxy<ClientAcceptedState> {
                 };
 
                 let connector = TlsConnector::from(Arc::new(config));
-                let dnsname = ServerName::try_from(host.as_str()).unwrap();
+                let dnsname = ServerName::try_from(host.clone()).unwrap();
 
                 info!(?server_addr_port, "Starting TLS with server");
                 Stream::tls(connector.connect(dnsname, stream_to_server).await?.into())

@@ -45,6 +45,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup | Install NASM (Windows)
+        uses: ilammy/setup-nasm@v1
+        if: matrix.os == 'windows-latest'
+
       - name: Setup | Install toolchain
         run: |
           rustup update --no-self-update stable

@@ -8,8 +8,8 @@ use imap_types::{
         Greeting, Status, StatusBody, Tagged,
     },
 };
-use rustls::{Certificate, PrivateKey};
 use thiserror::Error;
+use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tracing::warn;
 
 pub enum ControlFlow {
@@ -144,9 +144,9 @@ pub enum IdentityError {
     UnexpectedKeyCount { path: String, found: usize },
 }
 
-pub fn load_certificate_chain_pem<P: AsRef<Path>>(
+pub fn load_certificate_chain_pem<'a, P: AsRef<Path>>(
     path: P,
-) -> Result<Vec<Certificate>, IdentityError> {
+) -> Result<Vec<CertificateDer<'a>>, IdentityError> {
     let display_path = path.as_ref().display().to_string();
 
     let mut reader = BufReader::new(File::open(path).map_err(|error| IdentityError::Io {
@@ -156,7 +156,7 @@ pub fn load_certificate_chain_pem<P: AsRef<Path>>(
 
     rustls_pemfile::certs(&mut reader)
         .map(|res| {
-            res.map(|der| Certificate(der.to_vec()))
+            res.map(|der| CertificateDer::from(der.to_vec()))
                 .map_err(|source| IdentityError::Io {
                     source,
                     path: display_path.clone(),
@@ -165,7 +165,7 @@ pub fn load_certificate_chain_pem<P: AsRef<Path>>(
         .collect()
 }
 
-pub fn load_leaf_key_pem<P: AsRef<Path>>(path: P) -> Result<PrivateKey, IdentityError> {
+pub fn load_leaf_key_pem<'a, P: AsRef<Path>>(path: P) -> Result<PrivateKeyDer<'a>, IdentityError> {
     let display_path = path.as_ref().display().to_string();
 
     let mut reader = BufReader::new(File::open(&path).map_err(|source| IdentityError::Io {
@@ -180,7 +180,9 @@ pub fn load_leaf_key_pem<P: AsRef<Path>>(path: P) -> Result<PrivateKey, Identity
             source,
             path: display_path.clone(),
         })?;
-        keys.push(PrivateKey(key.secret_pkcs8_der().to_vec()));
+        keys.push(PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+            key.secret_pkcs8_der().to_vec(),
+        )));
     }
 
     match keys.len() {
