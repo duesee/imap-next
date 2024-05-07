@@ -17,8 +17,8 @@ use thiserror::Error;
 use crate::{
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveError, ReceiveEvent, ReceiveState},
-    send_response::{SendResponseEvent, SendResponseState},
     server_receive::{NextExpectedMessage, ServerReceiveState},
+    server_send::{SendResponseEvent, SendResponseState},
     types::CommandAuthenticate,
     Flow, FlowInterrupt,
 };
