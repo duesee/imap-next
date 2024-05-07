@@ -21,6 +21,7 @@ impl Task for CapabilityTask {
         CommandBody::Capability
     }
 
+    // Capabilities may be found in a data response.
     fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
         if let Data::Capability(capabilities) = data {
             self.output = Some(capabilities);
@@ -30,6 +31,7 @@ impl Task for CapabilityTask {
         }
     }
 
+    // Capabilities may be found in the status body of an untagged response.
     fn process_untagged(
         &mut self,
         status_body: StatusBody<'static>,
@@ -47,6 +49,7 @@ impl Task for CapabilityTask {
             StatusKind::Ok => match self.output {
                 Some(capabilities) => Ok(capabilities),
                 None => {
+                    // Capabilities may also be found in the status body of tagged response.
                     if let Some(Code::Capability(capabilities)) = status_body.code {
                         Ok(capabilities)
                     } else {

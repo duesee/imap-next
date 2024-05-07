@@ -16,7 +16,9 @@ pub type AuthenticateTaskOutput = Option<Capabilities>;
 #[derive(Clone, Debug)]
 pub struct AuthenticateTask {
     mechanism: AuthMechanism<'static>,
+    /// The initial line used by the `SASL-IR` extension.
     line: Option<Vec<u8>>,
+    /// Initial response from the `SASL-IR` extension.
     ir: bool,
     output: AuthenticateTaskOutput,
 }
@@ -36,7 +38,7 @@ impl Task for AuthenticateTask {
         }
     }
 
-    /// Process data response.
+    // Capabilities may be found in a data response.
     fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
         if let Data::Capability(capabilities) = data {
             self.output = Some(capabilities);
@@ -62,6 +64,7 @@ impl Task for AuthenticateTask {
     fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
         match status_body.kind {
             StatusKind::Ok => Ok(self.output.or(
+                // Capabilities may also be found in the status body of tagged response.
                 if let Some(Code::Capability(capabilities)) = status_body.code {
                     Some(capabilities)
                 } else {

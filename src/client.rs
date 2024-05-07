@@ -68,14 +68,6 @@ impl Flow for ClientFlow {
 }
 
 impl ClientFlow {
-    pub fn use_response_codec(&mut self) {
-        self.receive_state = ClientReceiveState::Response(ReceiveState::new(
-            ResponseCodec::default(),
-            self.options.crlf_relaxed,
-            None,
-        ))
-    }
-
     pub fn new(options: ClientFlowOptions) -> Self {
         let send_command_state = SendCommandState::new(
             CommandCodec::default(),
@@ -95,6 +87,20 @@ impl ClientFlow {
             send_command_state,
             receive_state,
         }
+    }
+
+    /// Changes the actual receive state codec with the
+    /// [`ResponseCodec`]'s one.
+    ///
+    /// The main use case of this function is straight after receiving
+    /// greeting, in order to replace the actual greeting codec by the
+    /// default response codec.
+    pub fn use_response_codec(&mut self) {
+        self.receive_state = ClientReceiveState::Response(ReceiveState::new(
+            ResponseCodec::default(),
+            self.options.crlf_relaxed,
+            None,
+        ))
     }
 
     pub fn enqueue_input(&mut self, bytes: &[u8]) {

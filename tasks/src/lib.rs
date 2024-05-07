@@ -354,7 +354,7 @@ pub enum SchedulerError {
     #[error("unexpected NO response: {}", .0.text)]
     UnexpectedNoResponse(StatusBody<'static>),
 
-    #[error("missing data for command {0}")]
+    #[error("missing required data for command {0}")]
     MissingData(String),
 }
 
