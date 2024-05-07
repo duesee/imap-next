@@ -14,9 +14,9 @@ use thiserror::Error;
 
 use crate::{
     client_receive::ClientReceiveState,
+    client_send::{SendCommandEvent, SendCommandState, SendCommandTermination},
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveError, ReceiveEvent, ReceiveState},
-    send_command::{SendCommandEvent, SendCommandState, SendCommandTermination},
     types::CommandAuthenticate,
     Flow, FlowInterrupt,
 };

@@ -2,9 +2,9 @@
 
 pub mod client;
 mod client_receive;
+mod client_send;
 mod handle;
 mod receive;
-mod send_command;
 mod send_response;
 pub mod server;
 mod server_receive;
