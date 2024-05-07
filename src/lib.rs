@@ -7,6 +7,7 @@ mod receive;
 mod send_command;
 mod send_response;
 pub mod server;
+mod server_receive;
 #[cfg(feature = "stream")]
 pub mod stream;
 #[cfg(test)]
