@@ -47,8 +47,9 @@ jobs:
 
       - name: Setup | Install toolchain
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup toolchain install nightly --profile minimal
+          rustup update --no-self-update stable
+          rustup update --no-self-update nightly
+          rustup set profile minimal
 
       - name: Setup | Install cargo-fuzz
         run: |
@@ -101,8 +102,9 @@ jobs:
       - name: Setup | Install toolchain
         run: |
           # 1.66 is the Minimum Supported Rust Version (MSRV) for imap-flow.
-          rustup toolchain install 1.66 --profile minimal
-          rustup toolchain install nightly --profile minimal
+          rustup update --no-self-update 1.66
+          rustup update --no-self-update nightly
+          rustup set profile minimal
 
       - name: Setup | Cache dependencies
         uses: Swatinem/rust-cache@v2.5.1
