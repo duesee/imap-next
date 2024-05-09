@@ -140,7 +140,7 @@ impl Scheduler {
     }
 
     /// Enqueue a [`Task`] for immediate resolution.
-    pub fn run_task<'a, T: Task>(&'a mut self, task: T) -> TaskRunner<'a, T> {
+    pub fn run_task<T: Task>(&mut self, task: T) -> TaskRunner<T> {
         let handle = self.enqueue_task(task);
 
         TaskRunner {
