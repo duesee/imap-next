@@ -114,11 +114,17 @@ install: install_rust_1_70 \
 
 [private]
 install_rust_1_70:
-    rustup toolchain install 1.70 --profile minimal
+    # Fix issue
+    rustup update --no-self-update 1.70
+    rustup set profile minimal
+    # rustup toolchain install 1.70 --profile minimal
 
 [private]
 install_rust_nightly:
-    rustup toolchain install nightly --profile minimal
+    # Fix issue
+    rustup update --no-self-update nightly
+    rustup set profile minimal
+    # rustup toolchain install nightly --profile minimal
 
 [private]
 install_rust_nightly_fmt:
