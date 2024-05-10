@@ -25,7 +25,7 @@ async fn main() {
     println!("capabilities: {capabilities:#?}");
 
     let handle2 = scheduler.enqueue_task(AuthenticateTask::plain("alice", "pa²²w0rd", true));
-    let handle3 = scheduler.enqueue_task(LogoutTask::new());
+    let handle3 = scheduler.enqueue_task(LogoutTask::default());
 
     loop {
         match stream.progress(&mut scheduler).await.unwrap() {
