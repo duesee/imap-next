@@ -4,7 +4,7 @@ use imap_flow::{
 };
 use imap_types::response::{Response, Status};
 use tasks::{
-    tasks::{AuthenticatePlainTask, CapabilityTask, LogoutTask},
+    tasks::{authenticate::AuthenticatePlainTask, capability::CapabilityTask, logout::LogoutTask},
     Scheduler, SchedulerEvent,
 };
 use tokio::net::TcpStream;
