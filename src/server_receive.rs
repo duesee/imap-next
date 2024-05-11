@@ -69,5 +69,5 @@ pub enum NextExpectedMessage {
     IdleDone,
 }
 
-/// A dummy codec we use for technical reasons when we don't want to receive anything at all.
+/// Dummy codec used for technical reasons when we don't want to receive anything at all.
 pub struct NoCodec;

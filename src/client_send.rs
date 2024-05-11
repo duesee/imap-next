@@ -21,7 +21,7 @@ pub struct ClientSendState {
     idle_done_codec: IdleDoneCodec,
     /// FIFO queue for messages that should be sent next.
     queued_messages: VecDeque<QueuedMessage>,
-    /// The message that is currently being sent.
+    /// Message that is currently being sent.
     current_message: Option<CurrentMessage>,
 }
 
@@ -444,7 +444,7 @@ impl<S> FinishSendingResult<S> {
 struct CommandState {
     handle: ClientFlowCommandHandle,
     command: Command<'static>,
-    /// The outstanding command fragments that needs to be sent.
+    /// Outstanding command fragments that needs to be sent.
     fragments: VecDeque<Fragment>,
     activity: CommandActivity,
 }
@@ -524,12 +524,12 @@ impl CommandState {
 enum CommandActivity {
     /// Pushing fragments to the write buffer.
     PushingFragments {
-        /// A literal that was accepted by the server and needs to be sent before the fragments.
+        /// Literal that was accepted by the server and needs to be sent before the fragments.
         accepted_literal: Option<Vec<u8>>,
     },
     /// Waiting until the pushed fragments are sent.
     WaitingForFragmentsSent {
-        /// A literal that needs to be accepted by the server after the pushed fragments are sent.
+        /// Literal that needs to be accepted by the server after the pushed fragments are sent.
         limbo_literal: Option<Vec<u8>>,
     },
     /// Waiting until the server accepts the literal via continuation request or rejects it
@@ -674,7 +674,7 @@ enum IdleActivity {
     WaitingForIdleDoneSent,
 }
 
-/// A message was sent.
+/// Message sent.
 pub enum ClientSendEvent {
     Command {
         handle: ClientFlowCommandHandle,

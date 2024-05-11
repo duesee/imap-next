@@ -78,7 +78,7 @@ impl ServerSendState {
     }
 }
 
-/// A message that is queued but not sent yet.
+/// Message that is queued but not sent yet.
 enum QueuedMessage {
     Greeting {
         greeting: Greeting<'static>,
@@ -125,7 +125,7 @@ fn push_encoded_to_buffer(write_buffer: &mut Vec<u8>, encoded: Encoded) {
     }
 }
 
-/// A message that is currently being sent.
+/// Message that is currently being sent.
 enum CurrentMessage {
     Greeting {
         greeting: Greeting<'static>,
@@ -136,7 +136,7 @@ enum CurrentMessage {
     },
 }
 
-/// A message was sent.
+/// Message was sent.
 pub enum ServerSendEvent {
     Greeting {
         greeting: Greeting<'static>,

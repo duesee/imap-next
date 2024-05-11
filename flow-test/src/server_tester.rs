@@ -9,7 +9,7 @@ use tracing::trace;
 
 use crate::codecs::Codecs;
 
-/// A wrapper for `ServerFlow` suitable for testing.
+/// Wrapper for `ServerFlow` suitable for testing.
 pub struct ServerTester {
     codecs: Codecs,
     server_flow_options: ServerFlowOptions,
@@ -185,14 +185,14 @@ impl ServerTester {
     }
 }
 
-/// The current state of the connection between server and client.
+/// Connection state between server and client.
 #[allow(clippy::large_enum_variant)]
 enum ConnectionState {
-    // The server has established a TCP connection to the client.
+    // Connection to client established.
     Connected { stream: Stream },
-    // The server has greeted the client.
+    // Server greeted client.
     Greeted { stream: Stream, server: ServerFlow },
-    // The TCP connection between server and client was dropped.
+    // Connection dropped.
     Disconnected,
 }
 

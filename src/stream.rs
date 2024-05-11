@@ -175,7 +175,7 @@ impl Stream {
 /// Error during reading into or writing from a stream.
 #[derive(Debug, Error)]
 pub enum StreamError<E> {
-    /// The operation failed because the stream is closed.
+    /// Operation failed because stream is closed.
     ///
     /// We detect this by checking if the read or written byte count is 0. Whether the stream is
     /// closed indefinitely or temporarily depends on the actual stream implementation.

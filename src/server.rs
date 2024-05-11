@@ -34,7 +34,7 @@ pub struct ServerFlowOptions {
     ///
     /// Bigger literals are rejected by the server.
     ///
-    /// Currently we don't distinguish between general literals and the literal used in the
+    /// Currently, we don't distinguish between general literals and the literal used in the
     /// APPEND command. However, this might change in the future. Note that
     /// `max_literal_size < max_command_size` must hold.
     pub max_literal_size: u32,
@@ -467,7 +467,7 @@ impl ServerFlow {
     }
 }
 
-/// A handle for an enqueued [`Response`].
+/// Handle for enqueued [`Response`].
 ///
 /// This handle can be used to track the sending progress. After a [`Response`] was enqueued via
 /// [`ServerFlow::enqueue_data`] or [`ServerFlow::enqueue_status`] it is in the process of being

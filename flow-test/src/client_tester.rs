@@ -182,12 +182,12 @@ impl ClientTester {
     }
 }
 
-/// The current state of the connection between client and server.
+/// Connection state between client and server.
 #[allow(clippy::large_enum_variant)]
 enum ConnectionState {
-    /// The client has established a TCP connection to the server.
+    /// Connection to server established.
     Connected { stream: Stream, client: ClientFlow },
-    /// The TCP connection between client and server was dropped.
+    /// Connection dropped.
     Disconnected,
 }
 
@@ -207,7 +207,7 @@ impl ConnectionState {
     }
 }
 
-/// A command that was enqueued and can later be used for assertions.
+/// Enqueued command that can be used for assertions.
 pub struct EnqueuedCommand {
     handle: ClientFlowCommandHandle,
     command: Command<'static>,

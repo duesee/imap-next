@@ -190,22 +190,18 @@ pub enum ReceiveError<C: Decoder> {
     MessageTooLong,
 }
 
-/// The next fragment that will be read...
+/// Next fragment that will be read...
 #[derive(Clone, Copy, Debug)]
 enum NextFragment {
-    // ... is a line.
-    //
-    // Note: A message always starts (and ends) with a line.
+    /// ... is a line.
     Line {
-        // How many bytes in the current line do we already have checked?
-        // This is important if we need multiple attempts to read from the underlying
-        // stream before the line is completely received.
+        /// How many bytes in the current line do we already have checked?
+        /// This is important if we need multiple attempts to read from the underlying
+        /// stream before the line is completely received.
         seen_bytes_in_line: usize,
     },
-    // ... is a literal with the given length.
-    Literal {
-        length: u32,
-    },
+    /// ... is a literal with the given length.
+    Literal { length: u32 },
 }
 
 impl NextFragment {
@@ -216,11 +212,11 @@ impl NextFragment {
     }
 }
 
-/// A line ending for the current line was found.
+/// Line ending found.
 struct FindCrlfResult {
-    // The position of the `\n` symbol
+    /// Position of `\n` symbol
     lf_position: usize,
-    // Is the line ending `\n` even though we expected `\r\n`?
+    /// Is the line ending `\n` even though we expected `\r\n`?
     expected_crlf_got_lf: bool,
 }
 
@@ -229,7 +225,7 @@ struct FindCrlfResult {
 /// Parameters:
 /// - `buf`: The buffer that contains the current line starting at index 0.
 /// - `start`: At this index the search for `\n` will start. Note that the `\r` might be located
-//     before this index.
+///    before this index.
 /// - `crlf_relaxed`: Whether the accepted line ending is `\n` or `\r\n`.
 fn find_crlf(buf: &[u8], start: usize, crlf_relaxed: bool) -> Option<FindCrlfResult> {
     let lf_position = start + buf[start..].iter().position(|item| *item == b'\n')?;

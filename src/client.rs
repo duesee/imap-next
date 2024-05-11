@@ -294,7 +294,7 @@ impl ClientFlow {
     }
 }
 
-/// A handle for an enqueued [`Command`].
+/// Handle for enqueued [`Command`].
 ///
 /// This handle can be used to track the sending progress. After a [`Command`] was enqueued via
 /// [`ClientFlow::enqueue_command`] it is in the process of being sent until
@@ -309,9 +309,9 @@ impl Handle for ClientFlowCommandHandle {
     }
 }
 
-// Implement a short debug representation that hides the underlying raw handle
+/// Debug representation hiding the raw handle.
 impl Debug for ClientFlowCommandHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ClientFlowCommandHandle")
             .field(&self.0.generator_id())
             .field(&self.0.handle_id())
@@ -321,36 +321,31 @@ impl Debug for ClientFlowCommandHandle {
 
 #[derive(Debug)]
 pub enum ClientFlowEvent {
-    /// Server [`Greeting`] received.
-    GreetingReceived {
-        greeting: Greeting<'static>,
-    },
-    /// Enqueued [`Command`] successfully sent.
+    /// [`Greeting`] received.
+    GreetingReceived { greeting: Greeting<'static> },
+    /// [`Command`] sent completely.
     CommandSent {
         /// Handle to the enqueued [`Command`].
         handle: ClientFlowCommandHandle,
         /// Formerly enqueued [`Command`].
         command: Command<'static>,
     },
-    /// Enqueued [`Command`] rejected.
-    ///
-    /// Note: Emitted when the server rejected a command literal with `BAD`.
+    /// [`Command`] rejected due to literal.
     CommandRejected {
-        /// Handle to the enqueued [`Command`].
+        /// Handle to enqueued [`Command`].
         handle: ClientFlowCommandHandle,
         /// Formerly enqueued [`Command`].
         command: Command<'static>,
-        /// [`Status`] sent by the server in order to reject the [`Command`].
+        /// [`Status`] sent by the server to reject the [`Command`].
         ///
         /// Note: [`ClientFlow`] already handled this [`Status`] but it might still have
         /// useful information that could be logged or displayed to the user
         /// (e.g. [`Code::Alert`](imap_types::response::Code::Alert)).
         status: Status<'static>,
     },
-    AuthenticateStarted {
-        handle: ClientFlowCommandHandle,
-    },
-    /// Server is requesting (more) authentication data.
+    /// AUTHENTICATE sent.
+    AuthenticateStarted { handle: ClientFlowCommandHandle },
+    /// Server requests (more) authentication data.
     ///
     /// The client MUST call [`ClientFlow::set_authenticate_data`] next.
     ///
@@ -361,33 +356,30 @@ pub enum ClientFlowEvent {
         handle: ClientFlowCommandHandle,
         continuation_request: CommandContinuationRequest<'static>,
     },
+    /// [`Status`] received to authenticate command.
     AuthenticateStatusReceived {
         handle: ClientFlowCommandHandle,
         command_authenticate: CommandAuthenticate,
         status: Status<'static>,
     },
-    IdleCommandSent {
-        handle: ClientFlowCommandHandle,
-    },
+    /// IDLE sent.
+    IdleCommandSent { handle: ClientFlowCommandHandle },
+    /// IDLE accepted by server. Entering IDLE state.
     IdleAccepted {
         handle: ClientFlowCommandHandle,
         continuation_request: CommandContinuationRequest<'static>,
     },
+    /// IDLE rejected by server.
     IdleRejected {
         handle: ClientFlowCommandHandle,
         status: Status<'static>,
     },
-    IdleDoneSent {
-        handle: ClientFlowCommandHandle,
-    },
+    /// DONE sent. Exiting IDLE state.
+    IdleDoneSent { handle: ClientFlowCommandHandle },
     /// Server [`Data`] received.
-    DataReceived {
-        data: Data<'static>,
-    },
+    DataReceived { data: Data<'static> },
     /// Server [`Status`] received.
-    StatusReceived {
-        status: Status<'static>,
-    },
+    StatusReceived { status: Status<'static> },
     /// Server [`CommandContinuationRequest`] response received.
     ///
     /// Note: The received continuation request was not part of [`ClientFlow`] handling.

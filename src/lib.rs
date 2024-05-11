@@ -47,7 +47,7 @@ impl<F: Flow> Flow for &mut F {
     }
 }
 
-/// The protocol flow was interrupted by an event that needs to be handled externally.
+/// Protocol flow was interrupted by an event that needs to be handled externally.
 #[must_use = "If the protocol flow is interrupted the interrupt must be handled. Ignoring this might result in a deadlock on IMAP level"]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FlowInterrupt<E> {
@@ -57,11 +57,11 @@ pub enum FlowInterrupt<E> {
     Error(E),
 }
 
-/// The user of `imap-flow` must perform an IO operation in order to progress the protocol flow.
+/// User of `imap-flow` must perform an IO operation to progress the protocol flow.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FlowIo {
     /// More bytes must be read and passed to [`Flow::enqueue_input`].
     NeedMoreInput,
-    /// The given bytes must be written.
+    /// Given bytes must be written.
     Output(Vec<u8>),
 }
