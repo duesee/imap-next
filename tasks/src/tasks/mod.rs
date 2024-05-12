@@ -13,4 +13,7 @@ pub enum TaskError {
 
     #[error("unexpected NO response: {}", .0.text)]
     UnexpectedNoResponse(StatusBody<'static>),
+
+    #[error("missing required data for command {0}")]
+    MissingData(String),
 }
