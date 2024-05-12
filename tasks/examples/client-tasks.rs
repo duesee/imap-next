@@ -4,7 +4,7 @@ use imap_flow::{
 };
 use imap_types::response::{Response, Status};
 use tasks::{
-    tasks::{authenticate::AuthenticatePlainTask, capability::CapabilityTask, logout::LogoutTask},
+    tasks::{authenticate::AuthenticateTask, capability::CapabilityTask, logout::LogoutTask},
     Scheduler, SchedulerEvent,
 };
 use tokio::net::TcpStream;
@@ -36,7 +36,7 @@ async fn main() {
         }
     }
 
-    let handle2 = scheduler.enqueue_task(AuthenticatePlainTask::new("alice", "pa²²w0rd", true));
+    let handle2 = scheduler.enqueue_task(AuthenticateTask::plain("alice", "pa²²w0rd", true));
     let handle3 = scheduler.enqueue_task(LogoutTask::default());
 
     loop {
