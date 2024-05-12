@@ -1,42 +1,68 @@
 use imap_types::{
     command::CommandBody,
     core::Vec1,
-    response::{Capability, Data, StatusBody, StatusKind},
+    response::{Capability, Code, Data, StatusBody, StatusKind},
 };
 
-use crate::Task;
+use crate::{tasks::TaskError, Task};
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct CapabilityTask {
     /// We use this as scratch space.
-    capabilities: Option<Vec1<Capability<'static>>>,
+    output: Option<Vec1<Capability<'static>>>,
+}
+
+impl CapabilityTask {
+    pub fn new() -> Self {
+        Default::default()
+    }
 }
 
 impl Task for CapabilityTask {
-    type Output = Result<Vec1<Capability<'static>>, &'static str>;
+    type Output = Result<Vec1<Capability<'static>>, TaskError>;
 
     fn command_body(&self) -> CommandBody<'static> {
         CommandBody::Capability
     }
 
+    // Capabilities may be found in a data response.
     fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
-        match data {
-            Data::Capability(capabilities) => {
-                self.capabilities = Some(capabilities);
-                None
-            }
-            unknown => Some(unknown),
+        if let Data::Capability(capabilities) = data {
+            self.output = Some(capabilities);
+            None
+        } else {
+            Some(data)
+        }
+    }
+
+    // Capabilities may be found in the status body of an untagged response.
+    fn process_untagged(
+        &mut self,
+        status_body: StatusBody<'static>,
+    ) -> Option<StatusBody<'static>> {
+        if let Some(Code::Capability(capabilities)) = status_body.code {
+            self.output = Some(capabilities);
+            None
+        } else {
+            Some(status_body)
         }
     }
 
     fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
         match status_body.kind {
-            StatusKind::Ok => match self.capabilities {
+            StatusKind::Ok => match self.output {
                 Some(capabilities) => Ok(capabilities),
-                None => Err("missing REQUIRED untagged CAPABILITY"),
+                None => {
+                    // Capabilities may also be found in the status body of tagged response.
+                    if let Some(Code::Capability(capabilities)) = status_body.code {
+                        Ok(capabilities)
+                    } else {
+                        Err(TaskError::MissingData("CAPABILITY".into()))
+                    }
+                }
             },
-            StatusKind::No => Err("unexpected NO result"),
-            StatusKind::Bad => Err("command unknown or arguments invalid"),
+            StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
+            StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
     }
 }
