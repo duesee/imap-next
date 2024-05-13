@@ -19,9 +19,6 @@ use imap_types::{
 };
 use static_assertions::assert_impl_all;
 use tag_generator::TagGenerator;
-use tasks::{
-    authenticate::AuthenticateTask, capability::CapabilityTask, logout::LogoutTask, noop::NoOpTask,
-};
 use thiserror::Error;
 
 /// Tells how a specific IMAP [`Command`] is processed.
@@ -150,30 +147,6 @@ impl Scheduler {
             scheduler: self,
             handle,
         }
-    }
-
-    /// Run the [`CapabilityTask`].
-    pub fn capability(&mut self) -> TaskRunner<CapabilityTask> {
-        self.run_task(CapabilityTask::new())
-    }
-
-    /// Run the [`AuthenticateTask`], using the `PLAIN` auth mechanism.
-    pub fn authenticate_plain(
-        &mut self,
-        login: &str,
-        passwd: &str,
-    ) -> TaskRunner<AuthenticateTask> {
-        self.run_task(AuthenticateTask::plain(login, passwd, true))
-    }
-
-    /// Run the [`LogoutTask`].
-    pub fn logout(&mut self) -> TaskRunner<LogoutTask> {
-        self.run_task(LogoutTask::new())
-    }
-
-    /// Run the [`NoOpTask`].
-    pub fn noop(&mut self) -> TaskRunner<NoOpTask> {
-        self.run_task(NoOpTask::new())
     }
 
     pub fn enqueue_input(&mut self, bytes: &[u8]) {
@@ -373,7 +346,6 @@ pub enum SchedulerError {
     /// Flow error.
     #[error("flow error")]
     Flow(#[from] ClientFlowError),
-
     /// Unexpected tag in command completion result.
     ///
     /// The scheduler received a tag that cannot be matched to an active command.
@@ -383,7 +355,6 @@ pub enum SchedulerError {
     /// It's better to halt the execution to avoid damage.
     #[error("unexpected tag in command completion result")]
     UnexpectedTaggedResponse(Tagged<'static>),
-
     #[error("unexpected BYE response")]
     UnexpectedByeResponse(Bye<'static>),
 }
