@@ -1,3 +1,4 @@
+pub mod resolver;
 pub mod tasks;
 
 use std::{
@@ -19,7 +20,6 @@ use imap_types::{
 };
 use tag_generator::TagGenerator;
 use thiserror::Error;
-use tracing::warn;
 
 /// Tells how a specific IMAP [`Command`] is processed.
 ///
@@ -135,16 +135,6 @@ impl Scheduler {
         self.waiting_tasks.push_back(handle, tag, Box::new(task));
 
         TaskHandle::new(handle)
-    }
-
-    /// Enqueue a [`Task`] for immediate resolution.
-    pub fn run_task<T: Task>(&mut self, task: T) -> TaskRunner<T> {
-        let handle = self.enqueue_task(task);
-
-        TaskRunner {
-            scheduler: self,
-            handle,
-        }
     }
 
     pub fn enqueue_input(&mut self, bytes: &[u8]) {
@@ -357,42 +347,6 @@ pub enum SchedulerError {
     UnexpectedByeResponse(Bye<'static>),
 }
 
-pub struct TaskRunner<'a, T: Task> {
-    scheduler: &'a mut Scheduler,
-    handle: TaskHandle<T>,
-}
-
-impl<T: Task> Flow for TaskRunner<'_, T> {
-    type Event = T::Output;
-    type Error = SchedulerError;
-
-    fn enqueue_input(&mut self, bytes: &[u8]) {
-        self.scheduler.enqueue_input(bytes);
-    }
-
-    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
-        loop {
-            match self.scheduler.progress()? {
-                SchedulerEvent::TaskFinished(mut token) => {
-                    if let Some(output) = self.handle.resolve(&mut token) {
-                        break Ok(output);
-                    } else {
-                        warn!("received unexpected task token: {token:?}")
-                    }
-                }
-                SchedulerEvent::Unsolicited(unsolicited) => {
-                    if let Response::Status(Status::Bye(bye)) = unsolicited {
-                        let err = SchedulerError::UnexpectedByeResponse(bye);
-                        break Err(FlowInterrupt::Error(err));
-                    } else {
-                        warn!("received unsolicited: {unsolicited:?}");
-                    }
-                }
-            }
-        }
-    }
-}
-
 #[derive(Eq)]
 pub struct TaskHandle<T: Task> {
     handle: ClientFlowCommandHandle,
@@ -545,7 +499,7 @@ where
 mod tests {
     use static_assertions::assert_impl_all;
 
-    use crate::Scheduler;
+    use super::Scheduler;
 
     assert_impl_all!(Scheduler: Send);
 }

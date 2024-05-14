@@ -16,13 +16,25 @@ async fn main() {
     let client = ClientFlow::new(ClientFlowOptions::default());
     let mut scheduler = Scheduler::new(client);
 
-    let capabilities = stream
-        .progress(scheduler.run_task(CapabilityTask::new()))
-        .await
-        .unwrap()
-        .unwrap();
+    let capability_handle = scheduler.enqueue_task(CapabilityTask::default());
 
-    println!("capabilities: {capabilities:?}");
+    loop {
+        match stream.progress(&mut scheduler).await.unwrap() {
+            SchedulerEvent::TaskFinished(mut token) => {
+                if let Some(capability) = capability_handle.resolve(&mut token) {
+                    println!("capability: {capability:?}");
+                    break;
+                }
+            }
+            SchedulerEvent::Unsolicited(unsolicited) => {
+                println!("unsolicited: {unsolicited:?}");
+
+                if let Response::Status(Status::Bye { .. }) = unsolicited {
+                    break;
+                }
+            }
+        }
+    }
 
     let auth_handle = scheduler.enqueue_task(AuthenticateTask::plain("alice", "pa²²w0rd", true));
     let logout_handle = scheduler.enqueue_task(LogoutTask::default());
