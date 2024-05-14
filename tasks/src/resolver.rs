@@ -31,22 +31,22 @@ impl Resolver {
     }
 
     /// Enqueue a [`Task`] for immediate resolution.
-    pub fn run_task<T: Task>(&mut self, task: T) -> TaskResolver<T> {
+    pub fn resolve<T: Task>(&mut self, task: T) -> ResolvingTask<T> {
         let handle = self.scheduler.enqueue_task(task);
 
-        TaskResolver {
+        ResolvingTask {
             resolver: self,
             handle,
         }
     }
 }
 
-pub struct TaskResolver<'a, T: Task> {
+pub struct ResolvingTask<'a, T: Task> {
     resolver: &'a mut Resolver,
     handle: TaskHandle<T>,
 }
 
-impl<T: Task> Flow for TaskResolver<'_, T> {
+impl<T: Task> Flow for ResolvingTask<'_, T> {
     type Event = T::Output;
     type Error = SchedulerError;
 
@@ -61,7 +61,7 @@ impl<T: Task> Flow for TaskResolver<'_, T> {
                     if let Some(output) = self.handle.resolve(&mut token) {
                         break Ok(output);
                     } else {
-                        warn!("received unexpected task token: {token:?}")
+                        warn!(?token, "received unexpected task token")
                     }
                 }
                 SchedulerEvent::Unsolicited(unsolicited) => {
@@ -69,7 +69,7 @@ impl<T: Task> Flow for TaskResolver<'_, T> {
                         let err = SchedulerError::UnexpectedByeResponse(bye);
                         break Err(FlowInterrupt::Error(err));
                     } else {
-                        warn!("received unsolicited: {unsolicited:?}");
+                        warn!(?unsolicited, "received unsolicited");
                     }
                 }
             }

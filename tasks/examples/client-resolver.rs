@@ -16,7 +16,7 @@ async fn main() {
     let mut resolver = Resolver::new(client);
 
     let capability = stream
-        .progress(resolver.run_task(CapabilityTask::new()))
+        .progress(resolver.resolve(CapabilityTask::new()))
         .await
         .unwrap()
         .unwrap();
@@ -24,7 +24,7 @@ async fn main() {
     println!("pre-auth capability: {capability:?}");
 
     let capability = stream
-        .progress(resolver.run_task(AuthenticateTask::plain("alice", "pa²²w0rd", true)))
+        .progress(resolver.resolve(AuthenticateTask::plain("alice", "pa²²w0rd", true)))
         .await
         .unwrap()
         .unwrap();
@@ -32,7 +32,7 @@ async fn main() {
     println!("maybe post-auth capability: {capability:?}");
 
     let capability = stream
-        .progress(resolver.run_task(CapabilityTask::new()))
+        .progress(resolver.resolve(CapabilityTask::new()))
         .await
         .unwrap()
         .unwrap();
@@ -40,7 +40,7 @@ async fn main() {
     println!("post-auth capability: {capability:?}");
 
     stream
-        .progress(resolver.run_task(LogoutTask::default()))
+        .progress(resolver.resolve(LogoutTask::default()))
         .await
         .unwrap()
         .unwrap();
