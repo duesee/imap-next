@@ -1,3 +1,4 @@
+pub mod resolver;
 pub mod tasks;
 
 use std::{
@@ -26,11 +27,11 @@ use thiserror::Error;
 /// and move out uninteresting responses (returning `Some(...)`).
 ///
 /// If no active task is interested in a given response, we call this response "unsolicited".
-pub trait Task: 'static {
+pub trait Task: Send + 'static {
     /// Output of the task.
     ///
     /// Returned in [`Self::process_tagged`].
-    type Output;
+    type Output: Any + Send;
 
     /// Returns the [`CommandBody`] to issue for this task.
     ///
@@ -342,6 +343,8 @@ pub enum SchedulerError {
     /// It's better to halt the execution to avoid damage.
     #[error("unexpected tag in command completion result")]
     UnexpectedTaggedResponse(Tagged<'static>),
+    #[error("unexpected BYE response")]
+    UnexpectedByeResponse(Bye<'static>),
 }
 
 #[derive(Eq)]
@@ -398,7 +401,7 @@ impl<T: Task> TaskHandle<T> {
 #[derive(Debug)]
 pub struct TaskToken {
     handle: ClientFlowCommandHandle,
-    output: Option<Box<dyn Any>>,
+    output: Option<Box<dyn Any + Send>>,
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -432,7 +435,7 @@ where
 ///
 /// * doesn't have an associated type and uses [`Any`] in [`Self::process_tagged`]
 /// * is an object-safe "subset" of [`Task`]
-trait TaskAny {
+trait TaskAny: Send {
     fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>>;
 
     fn process_untagged(&mut self, status_body: StatusBody<'static>)
@@ -450,7 +453,7 @@ trait TaskAny {
 
     fn process_bye(&mut self, bye: Bye<'static>) -> Option<Bye<'static>>;
 
-    fn process_tagged(self: Box<Self>, status_body: StatusBody<'static>) -> Box<dyn Any>;
+    fn process_tagged(self: Box<Self>, status_body: StatusBody<'static>) -> Box<dyn Any + Send>;
 }
 
 impl<T> TaskAny for T
@@ -487,7 +490,16 @@ where
     }
 
     /// Returns [`Any`] instead of [`Task::Output`].
-    fn process_tagged(self: Box<Self>, status_body: StatusBody<'static>) -> Box<dyn Any> {
+    fn process_tagged(self: Box<Self>, status_body: StatusBody<'static>) -> Box<dyn Any + Send> {
         Box::new(T::process_tagged(*self, status_body))
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use static_assertions::assert_impl_all;
+
+    use super::Scheduler;
+
+    assert_impl_all!(Scheduler: Send);
 }
