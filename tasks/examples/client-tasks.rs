@@ -21,20 +21,21 @@ async fn main() {
         .await
         .unwrap()
         .unwrap();
-    println!("capabilities: {capabilities:#?}");
 
-    let handle2 = scheduler.enqueue_task(AuthenticateTask::plain("alice", "pa²²w0rd", true));
-    let handle3 = scheduler.enqueue_task(LogoutTask::default());
+    println!("capabilities: {capabilities:?}");
+
+    let auth_handle = scheduler.enqueue_task(AuthenticateTask::plain("alice", "pa²²w0rd", true));
+    let logout_handle = scheduler.enqueue_task(LogoutTask::default());
 
     loop {
         match stream.progress(&mut scheduler).await.unwrap() {
             SchedulerEvent::TaskFinished(mut token) => {
-                if let Some(auth) = handle2.resolve(&mut token) {
-                    println!("handle2: {auth:?}");
+                if let Some(auth) = auth_handle.resolve(&mut token) {
+                    println!("auth: {auth:?}");
                 }
 
-                if let Some(logout) = handle3.resolve(&mut token) {
-                    println!("handle3: {logout:?}");
+                if let Some(logout) = logout_handle.resolve(&mut token) {
+                    println!("logout: {logout:?}");
                     break;
                 }
             }

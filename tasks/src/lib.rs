@@ -17,9 +17,9 @@ use imap_types::{
     core::Tag,
     response::{Bye, CommandContinuationRequest, Data, Response, Status, StatusBody, Tagged},
 };
-use static_assertions::assert_impl_all;
 use tag_generator::TagGenerator;
 use thiserror::Error;
+use tracing::warn;
 
 /// Tells how a specific IMAP [`Command`] is processed.
 ///
@@ -90,8 +90,6 @@ pub struct Scheduler {
     active_tasks: TaskMap,
     tag_generator: TagGenerator,
 }
-
-assert_impl_all!(Scheduler: Send);
 
 impl Flow for Scheduler {
     type Event = SchedulerEvent;
@@ -378,6 +376,8 @@ impl<T: Task> Flow for TaskRunner<'_, T> {
                 SchedulerEvent::TaskFinished(mut token) => {
                     if let Some(output) = self.handle.resolve(&mut token) {
                         break Ok(output);
+                    } else {
+                        warn!("received unexpected task token: {token:?}")
                     }
                 }
                 SchedulerEvent::Unsolicited(unsolicited) => {
@@ -385,7 +385,7 @@ impl<T: Task> Flow for TaskRunner<'_, T> {
                         let err = SchedulerError::UnexpectedByeResponse(bye);
                         break Err(FlowInterrupt::Error(err));
                     } else {
-                        println!("unsolicited: {unsolicited:?}");
+                        warn!("received unsolicited: {unsolicited:?}");
                     }
                 }
             }
@@ -539,4 +539,13 @@ where
     fn process_tagged(self: Box<Self>, status_body: StatusBody<'static>) -> Box<dyn Any + Send> {
         Box::new(T::process_tagged(*self, status_body))
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use static_assertions::assert_impl_all;
+
+    use crate::Scheduler;
+
+    assert_impl_all!(Scheduler: Send);
 }
