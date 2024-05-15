@@ -7,6 +7,7 @@ use imap_types::{
 use super::TaskError;
 use crate::Task;
 
+#[derive(Clone, Debug, Default)]
 pub struct IdTask {
     client: Option<Vec<(IString<'static>, NString<'static>)>>,
     server: Option<Vec<(IString<'static>, NString<'static>)>>,
