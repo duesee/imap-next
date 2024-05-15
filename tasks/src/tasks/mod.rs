@@ -2,6 +2,7 @@ use imap_types::response::StatusBody;
 use thiserror::Error;
 
 pub mod append;
+pub mod appenduid;
 pub mod authenticate;
 pub mod capability;
 pub mod check;
