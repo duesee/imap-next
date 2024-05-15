@@ -12,6 +12,7 @@ pub mod list;
 pub mod logout;
 pub mod noop;
 pub mod search;
+pub mod select;
 pub mod sort;
 pub mod starttls;
 pub mod store;
