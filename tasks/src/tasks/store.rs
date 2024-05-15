@@ -29,7 +29,7 @@ impl Task for StoreTask {
     fn command_body(&self) -> CommandBody<'static> {
         CommandBody::Store {
             sequence_set: self.sequence_set.clone(),
-            kind: self.kind.clone(),
+            kind: self.kind,
             response: StoreResponse::Answer,
             flags: self.flags.clone(),
             uid: self.uid,
@@ -100,7 +100,7 @@ impl Task for SilentStoreTask {
     fn command_body(&self) -> CommandBody<'static> {
         CommandBody::Store {
             sequence_set: self.0.sequence_set.clone(),
-            kind: self.0.kind.clone(),
+            kind: self.0.kind,
             response: StoreResponse::Silent,
             flags: self.0.flags.clone(),
             uid: self.0.uid,
