@@ -6,6 +6,7 @@ pub mod appenduid;
 pub mod authenticate;
 pub mod capability;
 pub mod check;
+pub mod copy;
 pub mod create;
 pub mod delete;
 pub mod expunge;
