@@ -7,6 +7,7 @@ pub mod fetch;
 pub mod id;
 pub mod logout;
 pub mod noop;
+pub mod search;
 pub mod starttls;
 pub mod store;
 
