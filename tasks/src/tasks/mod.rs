@@ -11,6 +11,7 @@ pub mod search;
 pub mod sort;
 pub mod starttls;
 pub mod store;
+pub mod thread;
 
 #[derive(Debug, Error)]
 pub enum TaskError {
