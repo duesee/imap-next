@@ -6,6 +6,7 @@ pub mod capability;
 pub mod id;
 pub mod logout;
 pub mod noop;
+pub mod starttls;
 pub mod store;
 
 #[derive(Debug, Error)]
