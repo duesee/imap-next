@@ -3,16 +3,11 @@ use imap_types::{
     response::{StatusBody, StatusKind},
 };
 
-use crate::{tasks::TaskError, Task};
+use super::TaskError;
+use crate::Task;
 
 #[derive(Clone, Debug, Default)]
 pub struct NoOpTask;
-
-impl NoOpTask {
-    pub fn new() -> Self {
-        Default::default()
-    }
-}
 
 impl Task for NoOpTask {
     type Output = Result<(), TaskError>;
@@ -27,5 +22,11 @@ impl Task for NoOpTask {
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
+    }
+}
+
+impl NoOpTask {
+    pub fn new() -> Self {
+        Default::default()
     }
 }
