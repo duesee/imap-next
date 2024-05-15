@@ -4,18 +4,13 @@ use imap_types::{
     response::{Capability, Code, Data, StatusBody, StatusKind},
 };
 
-use crate::{tasks::TaskError, Task};
+use super::TaskError;
+use crate::Task;
 
 #[derive(Clone, Debug, Default)]
 pub struct CapabilityTask {
     /// We use this as scratch space.
     output: Option<Vec1<Capability<'static>>>,
-}
-
-impl CapabilityTask {
-    pub fn new() -> Self {
-        Default::default()
-    }
 }
 
 impl Task for CapabilityTask {
@@ -35,7 +30,8 @@ impl Task for CapabilityTask {
         }
     }
 
-    // Capabilities may be found in the status body of an untagged response.
+    // Capabilities may (unfortunately) be found in a data response.
+    // See https://github.com/modern-email/defects/issues/18
     fn process_untagged(
         &mut self,
         status_body: StatusBody<'static>,
@@ -53,7 +49,7 @@ impl Task for CapabilityTask {
             StatusKind::Ok => match self.output {
                 Some(capabilities) => Ok(capabilities),
                 None => {
-                    // Capabilities may also be found in the status body of tagged response.
+                    // Capabilities may be found in the status body of tagged response.
                     if let Some(Code::Capability(capabilities)) = status_body.code {
                         Ok(capabilities)
                     } else {
@@ -64,5 +60,11 @@ impl Task for CapabilityTask {
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
+    }
+}
+
+impl CapabilityTask {
+    pub fn new() -> Self {
+        Default::default()
     }
 }
