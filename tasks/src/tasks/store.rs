@@ -39,7 +39,7 @@ impl Task for StoreTask {
     fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
         if let Data::Fetch { items, seq } = data {
             if let Some(items) = self.output.insert(seq, items) {
-                warn!(?items, "received duplicate items for message {seq}");
+                warn!(seq, ?items, "received duplicate items");
             }
 
             None
