@@ -8,6 +8,7 @@ pub mod delete;
 pub mod expunge;
 pub mod fetch;
 pub mod id;
+pub mod list;
 pub mod logout;
 pub mod noop;
 pub mod search;
