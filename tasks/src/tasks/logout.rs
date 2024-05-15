@@ -3,17 +3,12 @@ use imap_types::{
     response::{Bye, StatusBody, StatusKind},
 };
 
-use crate::{tasks::TaskError, Task};
+use super::TaskError;
+use crate::Task;
 
 #[derive(Clone, Debug, Default)]
 pub struct LogoutTask {
     got_bye: bool,
-}
-
-impl LogoutTask {
-    pub fn new() -> Self {
-        Default::default()
-    }
 }
 
 impl Task for LogoutTask {
@@ -40,5 +35,11 @@ impl Task for LogoutTask {
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
+    }
+}
+
+impl LogoutTask {
+    pub fn new() -> Self {
+        Default::default()
     }
 }
