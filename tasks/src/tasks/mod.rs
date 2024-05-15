@@ -14,6 +14,7 @@ pub mod fetch;
 pub mod id;
 pub mod list;
 pub mod logout;
+pub mod r#move;
 pub mod noop;
 pub mod search;
 pub mod select;
