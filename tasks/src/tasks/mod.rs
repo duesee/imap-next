@@ -5,6 +5,7 @@ pub mod authenticate;
 pub mod capability;
 pub mod create;
 pub mod delete;
+pub mod expunge;
 pub mod fetch;
 pub mod id;
 pub mod logout;
