@@ -3,6 +3,7 @@ use thiserror::Error;
 
 pub mod authenticate;
 pub mod capability;
+pub mod fetch;
 pub mod id;
 pub mod logout;
 pub mod noop;
