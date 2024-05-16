@@ -6,6 +6,7 @@ pub mod capability;
 pub mod id;
 pub mod logout;
 pub mod noop;
+pub mod store;
 
 #[derive(Debug, Error)]
 pub enum TaskError {
