@@ -20,41 +20,6 @@ pub struct AppendTask {
     output: Option<u32>,
 }
 
-impl Task for AppendTask {
-    type Output = Result<Option<u32>, TaskError>;
-
-    fn command_body(&self) -> CommandBody<'static> {
-        CommandBody::Append {
-            mailbox: self.mailbox.clone(),
-            flags: self.flags.clone(),
-            date: self.date.clone(),
-            message: self.message.clone(),
-        }
-    }
-
-    fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
-        // In case the mailbox is already selected, we should receive
-        // an `EXISTS` response.
-        if let Data::Exists(seq) = data {
-            if self.output.is_some() {
-                warn!("received duplicate APPEND EXISTS data");
-            }
-            self.output = Some(seq);
-            None
-        } else {
-            Some(data)
-        }
-    }
-
-    fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
-        match status_body.kind {
-            StatusKind::Ok => Ok(self.output),
-            StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
-            StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
-        }
-    }
-}
-
 impl AppendTask {
     pub fn new(mailbox: Mailbox<'static>, message: LiteralOrLiteral8<'static>) -> Self {
         Self {
@@ -94,6 +59,41 @@ impl AppendTask {
     }
 }
 
+impl Task for AppendTask {
+    type Output = Result<Option<u32>, TaskError>;
+
+    fn command_body(&self) -> CommandBody<'static> {
+        CommandBody::Append {
+            mailbox: self.mailbox.clone(),
+            flags: self.flags.clone(),
+            date: self.date.clone(),
+            message: self.message.clone(),
+        }
+    }
+
+    fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
+        // In case the mailbox is already selected, we should receive
+        // an `EXISTS` response.
+        if let Data::Exists(seq) = data {
+            if self.output.is_some() {
+                warn!("received duplicate APPEND EXISTS data");
+            }
+            self.output = Some(seq);
+            None
+        } else {
+            Some(data)
+        }
+    }
+
+    fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
+        match status_body.kind {
+            StatusKind::Ok => Ok(self.output),
+            StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
+            StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
+        }
+    }
+}
+
 /// Special [`NoOpTask`](super::noop::NoOpTask) that captures `EXISTS`
 /// responses.
 ///
@@ -103,6 +103,12 @@ impl AppendTask {
 #[derive(Clone, Debug, Default)]
 pub struct PostAppendNoOpTask {
     output: Option<u32>,
+}
+
+impl PostAppendNoOpTask {
+    pub fn new() -> Self {
+        Default::default()
+    }
 }
 
 impl Task for PostAppendNoOpTask {
@@ -130,12 +136,6 @@ impl Task for PostAppendNoOpTask {
     }
 }
 
-impl PostAppendNoOpTask {
-    pub fn new() -> Self {
-        Default::default()
-    }
-}
-
 /// Special [`CheckTask`](super::check::CheckTask) that captures
 /// `EXISTS` responses.
 ///
@@ -145,6 +145,12 @@ impl PostAppendNoOpTask {
 #[derive(Clone, Debug, Default)]
 pub struct PostAppendCheckTask {
     output: Option<u32>,
+}
+
+impl PostAppendCheckTask {
+    pub fn new() -> Self {
+        Default::default()
+    }
 }
 
 impl Task for PostAppendCheckTask {
@@ -169,11 +175,5 @@ impl Task for PostAppendCheckTask {
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
-    }
-}
-
-impl PostAppendCheckTask {
-    pub fn new() -> Self {
-        Default::default()
     }
 }

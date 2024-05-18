@@ -12,6 +12,12 @@ pub struct CreateTask {
     mailbox: Mailbox<'static>,
 }
 
+impl CreateTask {
+    pub fn new(mailbox: Mailbox<'static>) -> Self {
+        Self { mailbox }
+    }
+}
+
 impl Task for CreateTask {
     type Output = Result<(), TaskError>;
 
@@ -27,11 +33,5 @@ impl Task for CreateTask {
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
-    }
-}
-
-impl CreateTask {
-    pub fn new(mailbox: Mailbox<'static>) -> Self {
-        Self { mailbox }
     }
 }

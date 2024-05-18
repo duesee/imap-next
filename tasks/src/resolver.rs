@@ -9,19 +9,6 @@ pub struct Resolver {
     scheduler: Scheduler,
 }
 
-impl Flow for Resolver {
-    type Event = SchedulerEvent;
-    type Error = SchedulerError;
-
-    fn enqueue_input(&mut self, bytes: &[u8]) {
-        self.scheduler.enqueue_input(bytes);
-    }
-
-    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
-        self.scheduler.progress()
-    }
-}
-
 impl Resolver {
     /// Create a new resolver.
     pub fn new(flow: ClientFlow) -> Self {
@@ -38,6 +25,19 @@ impl Resolver {
             resolver: self,
             handle,
         }
+    }
+}
+
+impl Flow for Resolver {
+    type Event = SchedulerEvent;
+    type Error = SchedulerError;
+
+    fn enqueue_input(&mut self, bytes: &[u8]) {
+        self.scheduler.enqueue_input(bytes);
+    }
+
+    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
+        self.scheduler.progress()
     }
 }
 

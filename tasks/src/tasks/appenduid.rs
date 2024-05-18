@@ -20,33 +20,6 @@ pub struct AppendUidTask {
     message: LiteralOrLiteral8<'static>,
 }
 
-impl Task for AppendUidTask {
-    type Output = Result<Option<(NonZeroU32, NonZeroU32)>, TaskError>;
-
-    fn command_body(&self) -> CommandBody<'static> {
-        CommandBody::Append {
-            mailbox: self.mailbox.clone(),
-            flags: self.flags.clone(),
-            date: self.date.clone(),
-            message: self.message.clone(),
-        }
-    }
-
-    fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
-        match status_body.kind {
-            StatusKind::Ok => {
-                if let Some(Code::AppendUid { uid, uid_validity }) = status_body.code {
-                    Ok(Some((uid, uid_validity)))
-                } else {
-                    Ok(None)
-                }
-            }
-            StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
-            StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
-        }
-    }
-}
-
 impl AppendUidTask {
     pub fn new(mailbox: Mailbox<'static>, message: LiteralOrLiteral8<'static>) -> Self {
         Self {
@@ -82,5 +55,32 @@ impl AppendUidTask {
     pub fn with_date(mut self, date: DateTime) -> Self {
         self.set_date(date);
         self
+    }
+}
+
+impl Task for AppendUidTask {
+    type Output = Result<Option<(NonZeroU32, NonZeroU32)>, TaskError>;
+
+    fn command_body(&self) -> CommandBody<'static> {
+        CommandBody::Append {
+            mailbox: self.mailbox.clone(),
+            flags: self.flags.clone(),
+            date: self.date.clone(),
+            message: self.message.clone(),
+        }
+    }
+
+    fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
+        match status_body.kind {
+            StatusKind::Ok => {
+                if let Some(Code::AppendUid { uid, uid_validity }) = status_body.code {
+                    Ok(Some((uid, uid_validity)))
+                } else {
+                    Ok(None)
+                }
+            }
+            StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
+            StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
+        }
     }
 }

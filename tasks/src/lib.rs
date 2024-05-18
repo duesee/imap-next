@@ -91,19 +91,6 @@ pub struct Scheduler {
     tag_generator: TagGenerator,
 }
 
-impl Flow for Scheduler {
-    type Event = SchedulerEvent;
-    type Error = SchedulerError;
-
-    fn enqueue_input(&mut self, bytes: &[u8]) {
-        self.enqueue_input(bytes);
-    }
-
-    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
-        self.progress()
-    }
-}
-
 impl Scheduler {
     /// Create a new scheduler.
     pub fn new(flow: ClientFlow) -> Self {
@@ -272,6 +259,19 @@ impl Scheduler {
     }
 }
 
+impl Flow for Scheduler {
+    type Event = SchedulerEvent;
+    type Error = SchedulerError;
+
+    fn enqueue_input(&mut self, bytes: &[u8]) {
+        self.enqueue_input(bytes);
+    }
+
+    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
+        self.progress()
+    }
+}
+
 #[derive(Default)]
 struct TaskMap {
     tasks: VecDeque<(ClientFlowCommandHandle, Tag<'static>, Box<dyn TaskAny>)>,
@@ -353,28 +353,6 @@ pub struct TaskHandle<T: Task> {
     _t: PhantomData<T>,
 }
 
-impl<T: Task> Debug for TaskHandle<T> {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        f.debug_struct("TaskHandle")
-            .field("handle", &self.handle)
-            .finish()
-    }
-}
-
-impl<T: Task> Clone for TaskHandle<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: Task> Copy for TaskHandle<T> {}
-
-impl<T: Task> PartialEq for TaskHandle<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.handle == other.handle
-    }
-}
-
 impl<T: Task> TaskHandle<T> {
     fn new(handle: ClientFlowCommandHandle) -> Self {
         Self {
@@ -395,6 +373,28 @@ impl<T: Task> TaskHandle<T> {
         let output = output.downcast::<T::Output>().unwrap();
 
         Some(*output)
+    }
+}
+
+impl<T: Task> Debug for TaskHandle<T> {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        f.debug_struct("TaskHandle")
+            .field("handle", &self.handle)
+            .finish()
+    }
+}
+
+impl<T: Task> Clone for TaskHandle<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: Task> Copy for TaskHandle<T> {}
+
+impl<T: Task> PartialEq for TaskHandle<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.handle == other.handle
     }
 }
 

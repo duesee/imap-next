@@ -20,6 +20,16 @@ pub struct ListTask {
     )>,
 }
 
+impl ListTask {
+    pub fn new(mailbox: Mailbox<'static>, mailbox_wildcard: ListMailbox<'static>) -> Self {
+        Self {
+            mailbox,
+            mailbox_wildcard,
+            output: Vec::new(),
+        }
+    }
+}
+
 impl Task for ListTask {
     type Output = Result<
         Vec<(
@@ -56,16 +66,6 @@ impl Task for ListTask {
             StatusKind::Ok => Ok(self.output),
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
-        }
-    }
-}
-
-impl ListTask {
-    pub fn new(mailbox: Mailbox<'static>, mailbox_wildcard: ListMailbox<'static>) -> Self {
-        Self {
-            mailbox,
-            mailbox_wildcard,
-            output: Vec::new(),
         }
     }
 }

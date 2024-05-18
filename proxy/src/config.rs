@@ -19,6 +19,12 @@ pub struct Config {
     pub services: Vec<Service>,
 }
 
+impl Config {
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        Ok(toml::from_str(&std::fs::read_to_string(path)?)?)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Service {
     /// Name of service, e.g., "Best Email Provider".
@@ -132,12 +138,6 @@ impl Display for Connect {
                 write!(f, "imap://{}:{} (insecure)", host, port)
             }
         }
-    }
-}
-
-impl Config {
-    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
-        Ok(toml::from_str(&std::fs::read_to_string(path)?)?)
     }
 }
 

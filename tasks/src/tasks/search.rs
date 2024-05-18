@@ -17,6 +17,24 @@ pub struct SearchTask {
     output: Vec<NonZeroU32>,
 }
 
+impl SearchTask {
+    pub fn new(criteria: Vec1<SearchKey<'static>>) -> Self {
+        Self {
+            criteria,
+            ..Default::default()
+        }
+    }
+
+    pub fn set_uid(&mut self, uid: bool) {
+        self.uid = uid;
+    }
+
+    pub fn with_uid(mut self, uid: bool) -> Self {
+        self.set_uid(uid);
+        self
+    }
+}
+
 impl Default for SearchTask {
     fn default() -> Self {
         Self {
@@ -53,23 +71,5 @@ impl Task for SearchTask {
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
-    }
-}
-
-impl SearchTask {
-    pub fn new(criteria: Vec1<SearchKey<'static>>) -> Self {
-        Self {
-            criteria,
-            ..Default::default()
-        }
-    }
-
-    pub fn set_uid(&mut self, uid: bool) {
-        self.uid = uid;
-    }
-
-    pub fn with_uid(mut self, uid: bool) -> Self {
-        self.set_uid(uid);
-        self
     }
 }

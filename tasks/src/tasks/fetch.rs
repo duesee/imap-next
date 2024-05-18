@@ -22,6 +22,26 @@ pub struct FetchTask {
     output: HashMap<NonZeroU32, Vec1<MessageDataItem<'static>>>,
 }
 
+impl FetchTask {
+    pub fn new(sequence_set: SequenceSet, items: MacroOrMessageDataItemNames<'static>) -> Self {
+        Self {
+            sequence_set,
+            macro_or_item_names: items,
+            uid: true,
+            output: Default::default(),
+        }
+    }
+
+    pub fn set_uid(&mut self, uid: bool) {
+        self.uid = uid;
+    }
+
+    pub fn with_uid(mut self, uid: bool) -> Self {
+        self.set_uid(uid);
+        self
+    }
+}
+
 impl Task for FetchTask {
     type Output = Result<HashMap<NonZeroU32, Vec1<MessageDataItem<'static>>>, TaskError>;
 
@@ -51,26 +71,6 @@ impl Task for FetchTask {
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
-    }
-}
-
-impl FetchTask {
-    pub fn new(sequence_set: SequenceSet, items: MacroOrMessageDataItemNames<'static>) -> Self {
-        Self {
-            sequence_set,
-            macro_or_item_names: items,
-            uid: true,
-            output: Default::default(),
-        }
-    }
-
-    pub fn set_uid(&mut self, uid: bool) {
-        self.uid = uid;
-    }
-
-    pub fn with_uid(mut self, uid: bool) -> Self {
-        self.set_uid(uid);
-        self
     }
 }
 

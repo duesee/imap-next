@@ -21,6 +21,39 @@ pub struct SortTask {
     output: Option<Vec<NonZeroU32>>,
 }
 
+impl SortTask {
+    pub fn new(
+        sort_criteria: Vec1<SortCriterion>,
+        search_criteria: Vec1<SearchKey<'static>>,
+    ) -> Self {
+        Self {
+            sort_criteria,
+            charset: Charset::try_from("UTF-8").unwrap(),
+            search_criteria,
+            uid: true,
+            output: Default::default(),
+        }
+    }
+
+    pub fn set_charset(&mut self, charset: Charset<'static>) {
+        self.charset = charset;
+    }
+
+    pub fn with_charset(mut self, charset: Charset<'static>) -> Self {
+        self.set_charset(charset);
+        self
+    }
+
+    pub fn set_uid(&mut self, uid: bool) {
+        self.uid = uid;
+    }
+
+    pub fn with_uid(mut self, uid: bool) -> Self {
+        self.set_uid(uid);
+        self
+    }
+}
+
 impl Task for SortTask {
     type Output = Result<Vec<NonZeroU32>, TaskError>;
 
@@ -54,38 +87,5 @@ impl Task for SortTask {
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
-    }
-}
-
-impl SortTask {
-    pub fn new(
-        sort_criteria: Vec1<SortCriterion>,
-        search_criteria: Vec1<SearchKey<'static>>,
-    ) -> Self {
-        Self {
-            sort_criteria,
-            charset: Charset::try_from("UTF-8").unwrap(),
-            search_criteria,
-            uid: true,
-            output: Default::default(),
-        }
-    }
-
-    pub fn set_charset(&mut self, charset: Charset<'static>) {
-        self.charset = charset;
-    }
-
-    pub fn with_charset(mut self, charset: Charset<'static>) -> Self {
-        self.set_charset(charset);
-        self
-    }
-
-    pub fn set_uid(&mut self, uid: bool) {
-        self.uid = uid;
-    }
-
-    pub fn with_uid(mut self, uid: bool) -> Self {
-        self.set_uid(uid);
-        self
     }
 }

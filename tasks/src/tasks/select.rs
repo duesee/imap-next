@@ -66,6 +66,24 @@ pub struct SelectTask {
     output: SelectDataUnvalidated,
 }
 
+impl SelectTask {
+    pub fn new(mailbox: Mailbox<'static>) -> Self {
+        Self {
+            mailbox,
+            read_only: false,
+            output: Default::default(),
+        }
+    }
+
+    pub fn read_only(mailbox: Mailbox<'static>) -> Self {
+        Self {
+            mailbox,
+            read_only: true,
+            output: Default::default(),
+        }
+    }
+}
+
 impl Task for SelectTask {
     type Output = Result<SelectDataUnvalidated, TaskError>;
 
@@ -131,24 +149,6 @@ impl Task for SelectTask {
             StatusKind::Ok => self.output.validate(),
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
-        }
-    }
-}
-
-impl SelectTask {
-    pub fn new(mailbox: Mailbox<'static>) -> Self {
-        Self {
-            mailbox,
-            read_only: false,
-            output: Default::default(),
-        }
-    }
-
-    pub fn read_only(mailbox: Mailbox<'static>) -> Self {
-        Self {
-            mailbox,
-            read_only: true,
-            output: Default::default(),
         }
     }
 }

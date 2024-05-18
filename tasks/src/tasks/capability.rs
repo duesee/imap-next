@@ -13,6 +13,12 @@ pub struct CapabilityTask {
     output: Option<Vec1<Capability<'static>>>,
 }
 
+impl CapabilityTask {
+    pub fn new() -> Self {
+        Default::default()
+    }
+}
+
 impl Task for CapabilityTask {
     type Output = Result<Vec1<Capability<'static>>, TaskError>;
 
@@ -60,11 +66,5 @@ impl Task for CapabilityTask {
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
-    }
-}
-
-impl CapabilityTask {
-    pub fn new() -> Self {
-        Default::default()
     }
 }

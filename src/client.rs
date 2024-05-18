@@ -46,27 +46,6 @@ pub struct ClientFlow {
     receive_state: ClientReceiveState,
 }
 
-impl Debug for ClientFlow {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        f.debug_struct("ClientFlow")
-            .field("handle_generator", &self.handle_generator)
-            .finish_non_exhaustive()
-    }
-}
-
-impl Flow for ClientFlow {
-    type Event = ClientFlowEvent;
-    type Error = ClientFlowError;
-
-    fn enqueue_input(&mut self, bytes: &[u8]) {
-        self.enqueue_input(bytes)
-    }
-
-    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
-        self.progress()
-    }
-}
-
 impl ClientFlow {
     pub fn new(options: ClientFlowOptions) -> Self {
         let send_state = ClientSendState::new(
@@ -294,6 +273,27 @@ impl ClientFlow {
     }
 }
 
+impl Debug for ClientFlow {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        f.debug_struct("ClientFlow")
+            .field("handle_generator", &self.handle_generator)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Flow for ClientFlow {
+    type Event = ClientFlowEvent;
+    type Error = ClientFlowError;
+
+    fn enqueue_input(&mut self, bytes: &[u8]) {
+        self.enqueue_input(bytes)
+    }
+
+    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
+        self.progress()
+    }
+}
+
 /// Handle for enqueued [`Command`].
 ///
 /// This handle can be used to track the sending progress. After a [`Command`] was enqueued via
@@ -303,12 +303,6 @@ impl ClientFlow {
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct ClientFlowCommandHandle(RawHandle);
 
-impl Handle for ClientFlowCommandHandle {
-    fn from_raw(handle: RawHandle) -> Self {
-        Self(handle)
-    }
-}
-
 /// Debug representation hiding the raw handle.
 impl Debug for ClientFlowCommandHandle {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -316,6 +310,12 @@ impl Debug for ClientFlowCommandHandle {
             .field(&self.0.generator_id())
             .field(&self.0.handle_id())
             .finish()
+    }
+}
+
+impl Handle for ClientFlowCommandHandle {
+    fn from_raw(handle: RawHandle) -> Self {
+        Self(handle)
     }
 }
 

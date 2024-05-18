@@ -71,28 +71,6 @@ pub struct ServerFlow {
     receive_state: ServerReceiveState,
 }
 
-impl Debug for ServerFlow {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        f.debug_struct("ServerFlow")
-            .field("options", &self.options)
-            .field("handle_generator", &self.handle_generator)
-            .finish_non_exhaustive()
-    }
-}
-
-impl Flow for ServerFlow {
-    type Event = ServerFlowEvent;
-    type Error = ServerFlowError;
-
-    fn enqueue_input(&mut self, bytes: &[u8]) {
-        self.enqueue_input(bytes)
-    }
-
-    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
-        self.progress()
-    }
-}
-
 impl ServerFlow {
     pub fn new(options: ServerFlowOptions, greeting: Greeting<'static>) -> Self {
         let mut send_state =
@@ -467,6 +445,28 @@ impl ServerFlow {
     }
 }
 
+impl Debug for ServerFlow {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        f.debug_struct("ServerFlow")
+            .field("options", &self.options)
+            .field("handle_generator", &self.handle_generator)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Flow for ServerFlow {
+    type Event = ServerFlowEvent;
+    type Error = ServerFlowError;
+
+    fn enqueue_input(&mut self, bytes: &[u8]) {
+        self.enqueue_input(bytes)
+    }
+
+    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
+        self.progress()
+    }
+}
+
 /// Handle for enqueued [`Response`].
 ///
 /// This handle can be used to track the sending progress. After a [`Response`] was enqueued via
@@ -476,12 +476,6 @@ impl ServerFlow {
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct ServerFlowResponseHandle(RawHandle);
 
-impl Handle for ServerFlowResponseHandle {
-    fn from_raw(raw_handle: RawHandle) -> Self {
-        Self(raw_handle)
-    }
-}
-
 // Implement a short debug representation that hides the underlying raw handle
 impl Debug for ServerFlowResponseHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -489,6 +483,12 @@ impl Debug for ServerFlowResponseHandle {
             .field(&self.0.generator_id())
             .field(&self.0.handle_id())
             .finish()
+    }
+}
+
+impl Handle for ServerFlowResponseHandle {
+    fn from_raw(raw_handle: RawHandle) -> Self {
+        Self(raw_handle)
     }
 }
 

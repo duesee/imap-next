@@ -19,6 +19,39 @@ pub struct ThreadTask {
     output: Option<Vec<Thread>>,
 }
 
+impl ThreadTask {
+    pub fn new(
+        algorithm: ThreadingAlgorithm<'static>,
+        search_criteria: Vec1<SearchKey<'static>>,
+    ) -> Self {
+        Self {
+            algorithm,
+            charset: Charset::try_from("UTF-8").unwrap(),
+            search_criteria,
+            uid: true,
+            output: Default::default(),
+        }
+    }
+
+    pub fn set_charset(&mut self, charset: Charset<'static>) {
+        self.charset = charset;
+    }
+
+    pub fn with_charset(mut self, charset: Charset<'static>) -> Self {
+        self.set_charset(charset);
+        self
+    }
+
+    pub fn set_uid(&mut self, uid: bool) {
+        self.uid = uid;
+    }
+
+    pub fn with_uid(mut self, uid: bool) -> Self {
+        self.set_uid(uid);
+        self
+    }
+}
+
 impl Task for ThreadTask {
     type Output = Result<Vec<Thread>, TaskError>;
 
@@ -52,38 +85,5 @@ impl Task for ThreadTask {
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
-    }
-}
-
-impl ThreadTask {
-    pub fn new(
-        algorithm: ThreadingAlgorithm<'static>,
-        search_criteria: Vec1<SearchKey<'static>>,
-    ) -> Self {
-        Self {
-            algorithm,
-            charset: Charset::try_from("UTF-8").unwrap(),
-            search_criteria,
-            uid: true,
-            output: Default::default(),
-        }
-    }
-
-    pub fn set_charset(&mut self, charset: Charset<'static>) {
-        self.charset = charset;
-    }
-
-    pub fn with_charset(mut self, charset: Charset<'static>) -> Self {
-        self.set_charset(charset);
-        self
-    }
-
-    pub fn set_uid(&mut self, uid: bool) {
-        self.uid = uid;
-    }
-
-    pub fn with_uid(mut self, uid: bool) -> Self {
-        self.set_uid(uid);
-        self
     }
 }

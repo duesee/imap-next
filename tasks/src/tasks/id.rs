@@ -13,6 +13,15 @@ pub struct IdTask {
     server: Option<Vec<(IString<'static>, NString<'static>)>>,
 }
 
+impl IdTask {
+    pub fn new(parameters: Option<Vec<(IString<'static>, NString<'static>)>>) -> Self {
+        Self {
+            client: parameters,
+            server: None,
+        }
+    }
+}
+
 impl Task for IdTask {
     type Output = Result<Option<Vec<(IString<'static>, NString<'static>)>>, TaskError>;
 
@@ -36,15 +45,6 @@ impl Task for IdTask {
             StatusKind::Ok => Ok(self.server),
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
-        }
-    }
-}
-
-impl IdTask {
-    pub fn new(parameters: Option<Vec<(IString<'static>, NString<'static>)>>) -> Self {
-        Self {
-            client: parameters,
-            server: None,
         }
     }
 }

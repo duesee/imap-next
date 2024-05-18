@@ -12,6 +12,12 @@ pub struct DeleteTask {
     mailbox: Mailbox<'static>,
 }
 
+impl DeleteTask {
+    pub fn new(mailbox: Mailbox<'static>) -> Self {
+        Self { mailbox }
+    }
+}
+
 impl Task for DeleteTask {
     type Output = Result<(), TaskError>;
 
@@ -27,11 +33,5 @@ impl Task for DeleteTask {
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
-    }
-}
-
-impl DeleteTask {
-    pub fn new(mailbox: Mailbox<'static>) -> Self {
-        Self { mailbox }
     }
 }

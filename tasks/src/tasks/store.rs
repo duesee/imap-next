@@ -23,6 +23,31 @@ pub struct StoreTask {
     output: HashMap<NonZeroU32, Vec1<MessageDataItem<'static>>>,
 }
 
+impl StoreTask {
+    pub fn new(sequence_set: SequenceSet, kind: StoreType, flags: Vec<Flag<'static>>) -> Self {
+        Self {
+            sequence_set,
+            kind,
+            flags,
+            uid: true,
+            output: Default::default(),
+        }
+    }
+
+    pub fn set_uid(&mut self, uid: bool) {
+        self.uid = uid;
+    }
+
+    pub fn with_uid(mut self, uid: bool) -> Self {
+        self.set_uid(uid);
+        self
+    }
+
+    pub fn silent(self) -> SilentStoreTask {
+        SilentStoreTask::new(self)
+    }
+}
+
 impl Task for StoreTask {
     type Output = Result<HashMap<NonZeroU32, Vec1<MessageDataItem<'static>>>, TaskError>;
 
@@ -54,31 +79,6 @@ impl Task for StoreTask {
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
-    }
-}
-
-impl StoreTask {
-    pub fn new(sequence_set: SequenceSet, kind: StoreType, flags: Vec<Flag<'static>>) -> Self {
-        Self {
-            sequence_set,
-            kind,
-            flags,
-            uid: true,
-            output: Default::default(),
-        }
-    }
-
-    pub fn set_uid(&mut self, uid: bool) {
-        self.uid = uid;
-    }
-
-    pub fn with_uid(mut self, uid: bool) -> Self {
-        self.set_uid(uid);
-        self
-    }
-
-    pub fn silent(self) -> SilentStoreTask {
-        SilentStoreTask::new(self)
     }
 }
 

@@ -9,6 +9,12 @@ use crate::Task;
 #[derive(Clone, Debug, Default)]
 pub struct StartTlsTask;
 
+impl StartTlsTask {
+    pub fn new() -> Self {
+        Default::default()
+    }
+}
+
 impl Task for StartTlsTask {
     type Output = Result<(), TaskError>;
 
@@ -22,11 +28,5 @@ impl Task for StartTlsTask {
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
-    }
-}
-
-impl StartTlsTask {
-    pub fn new() -> Self {
-        Default::default()
     }
 }

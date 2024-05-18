@@ -14,6 +14,25 @@ pub struct MoveTask {
     uid: bool,
 }
 
+impl MoveTask {
+    pub fn new(sequence_set: SequenceSet, mailbox: Mailbox<'static>) -> Self {
+        Self {
+            sequence_set,
+            mailbox,
+            uid: true,
+        }
+    }
+
+    pub fn set_uid(&mut self, uid: bool) {
+        self.uid = uid;
+    }
+
+    pub fn with_uid(mut self, uid: bool) -> Self {
+        self.set_uid(uid);
+        self
+    }
+}
+
 impl Task for MoveTask {
     type Output = Result<(), TaskError>;
 
@@ -31,24 +50,5 @@ impl Task for MoveTask {
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
-    }
-}
-
-impl MoveTask {
-    pub fn new(sequence_set: SequenceSet, mailbox: Mailbox<'static>) -> Self {
-        Self {
-            sequence_set,
-            mailbox,
-            uid: true,
-        }
-    }
-
-    pub fn set_uid(&mut self, uid: bool) {
-        self.uid = uid;
-    }
-
-    pub fn with_uid(mut self, uid: bool) -> Self {
-        self.set_uid(uid);
-        self
     }
 }

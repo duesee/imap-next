@@ -25,6 +25,12 @@ pub struct ExpungeTask {
     output: Vec<NonZeroU32>,
 }
 
+impl ExpungeTask {
+    pub fn new() -> Self {
+        Default::default()
+    }
+}
+
 impl Task for ExpungeTask {
     type Output = Result<Vec<NonZeroU32>, TaskError>;
 
@@ -47,11 +53,5 @@ impl Task for ExpungeTask {
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
-    }
-}
-
-impl ExpungeTask {
-    pub fn new() -> Self {
-        Default::default()
     }
 }

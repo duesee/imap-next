@@ -25,18 +25,6 @@ pub struct TestSetup {
     pub init_logging: bool,
 }
 
-impl Default for TestSetup {
-    fn default() -> Self {
-        Self {
-            codecs: Codecs::default(),
-            server_flow_options: ServerFlowOptions::default(),
-            client_flow_options: ClientFlowOptions::default(),
-            runtime_options: RuntimeOptions::default(),
-            init_logging: true,
-        }
-    }
-}
-
 impl TestSetup {
     /// Create a test setup to test the client side (mocking the server side).
     pub fn setup_client(self) -> (Runtime, Mock, ClientTester) {
@@ -94,6 +82,18 @@ impl TestSetup {
         );
 
         (rt, server, client)
+    }
+}
+
+impl Default for TestSetup {
+    fn default() -> Self {
+        Self {
+            codecs: Codecs::default(),
+            server_flow_options: ServerFlowOptions::default(),
+            client_flow_options: ClientFlowOptions::default(),
+            runtime_options: RuntimeOptions::default(),
+            init_logging: true,
+        }
     }
 }
 
