@@ -6,20 +6,23 @@ use imap_types::{
     core::Vec1,
     response::{Capability, Code, CommandContinuationRequest, Data, StatusBody, StatusKind},
     secret::Secret,
+    utils::escape_byte_string,
 };
+use tracing::error;
 
-use crate::{tasks::TaskError, Task};
+use super::TaskError;
+use crate::Task;
 
 #[derive(Clone, Debug)]
 pub struct AuthenticateTask {
     /// Authentication mechanism.
     ///
-    /// Note: Currently only used for `AUTH=PLAIN`.
+    /// Note: Currently used for `AUTH=PLAIN`, `AUTH=OAUTHBEARER` and `AUTH=XOAUTH2`.
     ///       Invariants need to be enforced through constructors.
     mechanism: AuthMechanism<'static>,
     /// Static authentication data.
     ///
-    /// Note: Currently only used for `AUTH=PLAIN`.
+    /// Note: Currently used for `AUTH=PLAIN`, `AUTH=OAUTHBEARER` and `AUTH=XOAUTH2`.
     line: Option<Vec<u8>>,
     /// Does the server support SASL's initial response?
     ir: bool,
@@ -32,6 +35,29 @@ impl AuthenticateTask {
 
         Self {
             mechanism: AuthMechanism::Plain,
+            line: Some(line.into_bytes()),
+            ir,
+            output: None,
+        }
+    }
+
+    pub fn oauthbearer(user: &str, host: &str, port: u16, token: &str, ir: bool) -> Self {
+        let line =
+            format!("n,a={user},\x01host={host}\x01port={port}\x01auth=Bearer {token}\x01\x01");
+
+        Self {
+            mechanism: AuthMechanism::OAuthBearer,
+            line: Some(line.into_bytes()),
+            ir,
+            output: None,
+        }
+    }
+
+    pub fn xoauth2(user: &str, token: &str, ir: bool) -> Self {
+        let line = format!("user={user}\x01auth=Bearer {token}\x01\x01");
+
+        Self {
+            mechanism: AuthMechanism::XOAuth2,
             line: Some(line.into_bytes()),
             ir,
             output: None,
@@ -67,27 +93,42 @@ impl Task for AuthenticateTask {
 
     fn process_continuation_request_authenticate(
         &mut self,
-        _: CommandContinuationRequest<'static>,
+        continuation: CommandContinuationRequest<'static>,
     ) -> Result<AuthenticateData<'static>, CommandContinuationRequest<'static>> {
+        let cancel = || match self.mechanism {
+            AuthMechanism::XOAuth2 => {
+                let err = match continuation {
+                    CommandContinuationRequest::Basic(data) => data.text().to_string(),
+                    CommandContinuationRequest::Base64(data) => escape_byte_string(data.as_ref()),
+                };
+
+                error!("cannot authenticate using XOAUTH2 mechanism: {err}");
+
+                AuthenticateData::r#continue(vec![])
+            }
+            _ => AuthenticateData::Cancel,
+        };
+
         if self.ir {
-            Ok(AuthenticateData::Cancel)
-        } else if let Some(line) = self.line.take() {
-            Ok(AuthenticateData::r#continue(line))
-        } else {
-            Ok(AuthenticateData::Cancel)
+            return Ok(cancel());
+        }
+
+        match self.line.take() {
+            Some(data) => Ok(AuthenticateData::r#continue(data)),
+            None => Ok(cancel()),
         }
     }
 
     fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
         match status_body.kind {
-            StatusKind::Ok => Ok(self.output.or(
+            StatusKind::Ok => Ok(
                 // Capabilities may be found in the status body of tagged response.
                 if let Some(Code::Capability(capabilities)) = status_body.code {
                     Some(capabilities)
                 } else {
-                    None
+                    self.output
                 },
-            )),
+            ),
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
