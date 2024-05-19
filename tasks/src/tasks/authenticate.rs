@@ -16,12 +16,12 @@ use crate::Task;
 pub struct AuthenticateTask {
     /// Authentication mechanism.
     ///
-    /// Note: Currently used for `AUTH=PLAIN`, `AUTH=XOAUTH2` and `AUTH=OAUTHBEARER`.
+    /// Note: Currently used for `AUTH=PLAIN`, `AUTH=OAUTHBEARER` and `AUTH=XOAUTH2`.
     ///       Invariants need to be enforced through constructors.
     mechanism: AuthMechanism<'static>,
     /// Static authentication data.
     ///
-    /// Note: Currently used for `AUTH=PLAIN`, `AUTH=XOAUTH2` and `AUTH=OAUTHBEARER`.
+    /// Note: Currently used for `AUTH=PLAIN`, `AUTH=OAUTHBEARER` and `AUTH=XOAUTH2`.
     line: Option<Vec<u8>>,
     /// Does the server support SASL's initial response?
     ir: bool,
@@ -40,17 +40,6 @@ impl AuthenticateTask {
         }
     }
 
-    pub fn xoauth2(user: &str, token: &str, ir: bool) -> Self {
-        let line = format!("user={user}\x01auth=Bearer {token}\x01\x01");
-
-        Self {
-            mechanism: AuthMechanism::XOAuth2,
-            line: Some(line.into_bytes()),
-            ir,
-            output: None,
-        }
-    }
-
     pub fn oauthbearer(user: &str, host: &str, port: u16, token: &str, ir: bool) -> Self {
         let line =
             format!("n,a={user},\x01host={host}\x01port={port}\x01auth=Bearer {token}\x01\x01");
@@ -59,6 +48,17 @@ impl AuthenticateTask {
             // FIXME: <https://github.com/duesee/imap-codec/pull/491>
             // mechanism: AuthMechanism::OAuthBearer,
             mechanism: AuthMechanism::try_from("OAUTHBEARER").unwrap(),
+            line: Some(line.into_bytes()),
+            ir,
+            output: None,
+        }
+    }
+
+    pub fn xoauth2(user: &str, token: &str, ir: bool) -> Self {
+        let line = format!("user={user}\x01auth=Bearer {token}\x01\x01");
+
+        Self {
+            mechanism: AuthMechanism::XOAuth2,
             line: Some(line.into_bytes()),
             ir,
             output: None,
