@@ -20,6 +20,9 @@ async fn main() {
 
     loop {
         match stream.progress(&mut scheduler).await.unwrap() {
+            SchedulerEvent::GreetingReceived(greeting) => {
+                println!("greeting: {greeting:?}");
+            }
             SchedulerEvent::TaskFinished(mut token) => {
                 if let Some(capability) = capability_handle.resolve(&mut token) {
                     println!("capability: {capability:?}");
@@ -41,6 +44,9 @@ async fn main() {
 
     loop {
         match stream.progress(&mut scheduler).await.unwrap() {
+            SchedulerEvent::GreetingReceived(_) => {
+                unreachable!()
+            }
             SchedulerEvent::TaskFinished(mut token) => {
                 if let Some(auth) = auth_handle.resolve(&mut token) {
                     println!("auth: {auth:?}");

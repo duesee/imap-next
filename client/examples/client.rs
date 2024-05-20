@@ -4,7 +4,7 @@ use imap_client::Client;
 async fn main() {
     let mut client = Client::insecure("127.0.0.1", 12345).await.unwrap();
 
-    let capabilities = client.refresh_capabilities().await.unwrap();
+    client.refresh_capabilities().await.unwrap();
 
-    println!("capabilities: {capabilities:?}");
+    println!("capabilities: {:?}", client.capabilities());
 }

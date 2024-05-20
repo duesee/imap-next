@@ -6,6 +6,7 @@ use imap_types::{
     core::Vec1,
     response::{Capability, Code, CommandContinuationRequest, Data, StatusBody, StatusKind},
     secret::Secret,
+    utils::escape_byte_string,
 };
 use tracing::error;
 
@@ -45,9 +46,7 @@ impl AuthenticateTask {
             format!("n,a={user},\x01host={host}\x01port={port}\x01auth=Bearer {token}\x01\x01");
 
         Self {
-            // FIXME: <https://github.com/duesee/imap-codec/pull/491>
-            // mechanism: AuthMechanism::OAuthBearer,
-            mechanism: AuthMechanism::try_from("OAUTHBEARER").unwrap(),
+            mechanism: AuthMechanism::OAuthBearer,
             line: Some(line.into_bytes()),
             ir,
             output: None,
@@ -96,45 +95,40 @@ impl Task for AuthenticateTask {
         &mut self,
         continuation: CommandContinuationRequest<'static>,
     ) -> Result<AuthenticateData<'static>, CommandContinuationRequest<'static>> {
-        let data = if self.ir {
-            if let AuthMechanism::XOAuth2 = self.mechanism {
-                // The current continuation request indicates an error,
-                // so we need to send an empty response in order to receive
-                // the final authentication error later on.
-                match continuation {
-                    CommandContinuationRequest::Basic(basic) => {
-                        let text = basic.text();
-                        error!("cannot authenticate using XOAUTH2 mechanism: {text}");
-                    }
-                    CommandContinuationRequest::Base64(data) => {
-                        let text = String::from_utf8_lossy(data.as_ref());
-                        error!("cannot authenticate using XOAUTH2 mechanism: {text}");
-                    }
-                }
+        let cancel = || match self.mechanism {
+            AuthMechanism::XOAuth2 => {
+                let err = match continuation {
+                    CommandContinuationRequest::Basic(data) => data.text().to_string(),
+                    CommandContinuationRequest::Base64(data) => escape_byte_string(data.as_ref()),
+                };
+
+                error!("cannot authenticate using XOAUTH2 mechanism: {err}");
+
                 AuthenticateData::r#continue(vec![])
-            } else {
-                AuthenticateData::Cancel
             }
-        } else {
-            self.line
-                .take()
-                .map(AuthenticateData::r#continue)
-                .unwrap_or(AuthenticateData::Cancel)
+            _ => AuthenticateData::Cancel,
         };
 
-        Ok(data)
+        if self.ir {
+            return Ok(cancel());
+        }
+
+        match self.line.take() {
+            Some(data) => Ok(AuthenticateData::r#continue(data)),
+            None => Ok(cancel()),
+        }
     }
 
     fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
         match status_body.kind {
-            StatusKind::Ok => Ok(self.output.or(
+            StatusKind::Ok => Ok(
                 // Capabilities may be found in the status body of tagged response.
                 if let Some(Code::Capability(capabilities)) = status_body.code {
                     Some(capabilities)
                 } else {
-                    None
+                    self.output
                 },
-            )),
+            ),
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }

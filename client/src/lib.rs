@@ -379,7 +379,7 @@ impl Client {
     }
 
     /// Lists mailboxes.
-    pub async fn list_mailboxes(
+    pub async fn list(
         &mut self,
         mailbox: impl TryInto<Mailbox<'_>, Error = ValidationError>,
         mailbox_wildcard: impl TryInto<ListMailbox<'_>, Error = ValidationError>,
