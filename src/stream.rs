@@ -172,6 +172,16 @@ impl Stream {
     }
 }
 
+/// Take the [`TcpStream`] out of a [`Stream`].
+///
+/// Useful when a TCP stream needs to be upgraded to a TLS one.
+#[cfg(feature = "expose_stream")]
+impl From<Stream> for TcpStream {
+    fn from(stream: Stream) -> Self {
+        stream.stream
+    }
+}
+
 /// Error during reading into or writing from a stream.
 #[derive(Debug, Error)]
 pub enum StreamError<E> {
