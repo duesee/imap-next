@@ -4,6 +4,7 @@ pub mod client;
 mod client_receive;
 mod client_send;
 mod handle;
+mod message;
 mod receive;
 pub mod server;
 mod server_receive;
