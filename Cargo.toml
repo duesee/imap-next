@@ -39,7 +39,6 @@ members = [
     "flow-test",
     "proxy",
     "tag-generator",
-    "tasks",
 ]
 
 [patch.crates-io]

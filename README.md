@@ -4,12 +4,39 @@
 
 # imap-flow
 
+```mermaid
+%%{init: {'theme': 'neutral' } }%%
+flowchart LR
+    imap-types --> imap-codec
+    imap-codec --> imap-flow
+    imap-flow -.-> proxy
+    imap-flow -.-> imap-client
+    
+    style imap-codec stroke-dasharray: 10 5
+    style imap-flow stroke-width:4px
+    
+    click imap-types href "https://github.com/duesee/imap-codec/tree/main/imap-types"
+    click imap-codec href "https://github.com/duesee/imap-codec"
+    click imap-flow href "https://github.com/duesee/imap-flow"
+    click proxy href "https://github.com/duesee/imap-flow/tree/main/proxy"
+    click imap-client href "https://github.com/soywod/imap-client"
+```
+
 `imap-flow` is a thin abstraction over IMAP's distinct "protocol flows".
 These are literal handling, AUTHENTICATE, and IDLE.
 
 The way these flows were defined in IMAP couples networking, parsing, and business logic.
 `imap-flow` untangles these flows, providing a minimal interface allowing sending and receiving coherent messages.
-It's a thin layer paving the ground for a correct client or server implementation.
+It's a thin layer paving the ground for higher-level client or server implementations.
+
+## Lower-level Libraries
+
+`imap-flow` uses [`imap-codec`](https://github.com/duesee/imap-flow) internally for parsing and serialization, and re-exposes [`imap-types`](https://github.com/duesee/imap-codec/imap-types).
+
+## Higher-level Libraries
+
+* [`proxy`](https://github.com/duesee/imap-flow/tree/main/proxy) is an IMAP proxy that gracefully forwards unsolicited responses, abstracts over literals, and `Debug`-prints messages.
+* [`imap-client`](https://github.com/soywod/imap-client) is a methods-based client library with a `client.capability()`, `client.login()`, ... interface.
 
 ## Usage
 
@@ -57,15 +84,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 This repository also serves as a playground for crates built on `imap-flow`.
 These will eventually be moved into their own repositories.
 
-Notably, we have the `proxy`, `tasks`, and `tag-generator` workspace members.
-
-* `proxy` is an already usable (but still not production-ready) IMAP proxy.
-  It gracefully forwards unsolicited responses, abstracts away literal processing, and `Debug`-prints messages.
-  Proxies are great for challenging the usability of a library, and we use them to validate our design decisions.
-  (See the [README](./proxy/README.md).)
-* `tasks` is our prototype of a higher-level IMAP library that abstracts away command and response handling into `Task`s.
-  This crate will eventually become what a client or server implementor should use to get IMAP right.
-  Currently, only the client side is implemented.
 * `tag-generator` generates process-wide unique (and unguessable) IMAP tags.
   This crate is here for organizational reasons and may be moved (or inlined) eventually.
 
