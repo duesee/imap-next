@@ -11,6 +11,47 @@ The way these flows were defined in IMAP couples networking, parsing, and busine
 `imap-flow` untangles these flows, providing a minimal interface allowing sending and receiving coherent messages.
 It's a thin layer paving the ground for a correct client or server implementation.
 
+## Usage
+
+```rust,no_run
+use std::error::Error;
+use imap_flow::{
+    client::{ClientFlow, ClientFlowEvent, ClientFlowOptions},
+    stream::Stream,
+};
+use imap_types::{
+    command::{Command, CommandBody},
+    core::Tag,
+};
+use tokio::net::TcpStream;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let mut stream = Stream::insecure(TcpStream::connect("127.0.0.1:1143").await?);
+    let mut client = ClientFlow::new(ClientFlowOptions::default());
+
+    loop {
+        match stream.progress(&mut client).await? {
+            event => {
+                println!("{event:?}");
+
+                if matches!(event, ClientFlowEvent::GreetingReceived { .. }) {
+                    break;
+                }
+            }
+        }
+    }
+
+    let handle = client.enqueue_command(Command::new("A1", CommandBody::login("Al¹cE", "pa²²w0rd")?)?);
+
+    loop {
+        match stream.progress(&mut client).await? {
+            event => println!("{event:?}"),
+        }
+    }
+}
+```
+
 ## Playground
 
 This repository also serves as a playground for crates built on `imap-flow`.
