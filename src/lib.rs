@@ -14,6 +14,11 @@ pub mod stream;
 mod tests;
 pub mod types;
 
+// Test examples from imap-flow's README.
+#[doc = include_str!("../README.md")]
+#[cfg(doctest)]
+pub struct ReadmeDoctests;
+
 /// Common sans I/O interface used to implement I/O drivers for types that implement our protocol flows.
 ///
 /// Most notably, [`ClientFlow`](client::ClientFlow) and [`ServerFlow`](server::ServerFlow) both implement
