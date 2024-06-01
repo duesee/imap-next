@@ -1,5 +1,6 @@
 use std::fmt::{Debug, Formatter};
 
+use bounded_static::ToBoundedStatic;
 use imap_codec::{
     decode::{AuthenticateDataDecodeError, CommandDecodeError, IdleDoneDecodeError},
     CommandCodec, GreetingCodec, ResponseCodec,
@@ -9,7 +10,10 @@ use imap_types::{
     command::{Command, CommandBody},
     core::{LiteralMode, Tag, Text},
     extensions::idle::IdleDone,
-    response::{CommandContinuationRequest, Data, Greeting, Response, Status},
+    response::{
+        CommandContinuationRequest, CommandContinuationRequestBasic, Data, Greeting, Response,
+        Status,
+    },
     secret::Secret,
 };
 use thiserror::Error;
@@ -42,8 +46,8 @@ pub struct ServerFlowOptions {
     ///
     /// Bigger commands raise an error.
     pub max_command_size: u32,
-    pub literal_accept_text: Text<'static>,
-    pub literal_reject_text: Text<'static>,
+    literal_accept_ccr: CommandContinuationRequest<'static>,
+    literal_reject_ccr: CommandContinuationRequest<'static>,
 }
 
 impl Default for ServerFlowOptions {
@@ -57,9 +61,51 @@ impl Default for ServerFlowOptions {
             // 64 KiB is used by Dovecot.
             max_command_size: (25 * 1024 * 1024) + (64 * 1024),
             // Short unmeaning text
-            literal_accept_text: Text::unvalidated("..."),
+            literal_accept_ccr: CommandContinuationRequest::basic(None, Text::unvalidated("..."))
+                .unwrap(),
             // Short unmeaning text
-            literal_reject_text: Text::unvalidated("..."),
+            literal_reject_ccr: CommandContinuationRequest::basic(None, Text::unvalidated("..."))
+                .unwrap(),
+        }
+    }
+}
+
+impl ServerFlowOptions {
+    pub fn literal_accept_text(&self) -> &Text {
+        match self.literal_accept_ccr {
+            CommandContinuationRequest::Basic(ref basic) => basic.text(),
+            CommandContinuationRequest::Base64(_) => unreachable!(),
+        }
+    }
+
+    pub fn set_literal_accept_text(&mut self, text: String) -> Result<(), String> {
+        // imap-codec doesn't return `text` on error. Thus, we first check with &str as a
+        // workaround ...
+        if CommandContinuationRequestBasic::new(None, text.as_str()).is_ok() {
+            // ... and can use `unwrap` later.
+            self.literal_accept_ccr = CommandContinuationRequest::basic(None, text).unwrap();
+            Ok(())
+        } else {
+            Err(text)
+        }
+    }
+
+    pub fn literal_reject_text(&self) -> &Text {
+        match self.literal_reject_ccr {
+            CommandContinuationRequest::Basic(ref basic) => basic.text(),
+            CommandContinuationRequest::Base64(_) => unreachable!(),
+        }
+    }
+
+    pub fn set_literal_reject_text(&mut self, text: String) -> Result<(), String> {
+        // imap-codec doesn't return `text` on error. Thus, we first check with &str as a
+        // workaround ...
+        if CommandContinuationRequestBasic::new(None, text.as_str()).is_ok() {
+            // ... and can use `unwrap` later.
+            self.literal_reject_ccr = CommandContinuationRequest::basic(None, text).unwrap();
+            Ok(())
+        } else {
+            Err(text)
         }
     }
 }
@@ -235,7 +281,7 @@ impl ServerFlow {
                                     let status = Status::bad(
                                         Some(tag),
                                         None,
-                                        self.options.literal_reject_text.clone(),
+                                        self.options.literal_reject_text().to_static(),
                                     )
                                     .unwrap();
                                     self.send_state
@@ -273,7 +319,7 @@ impl ServerFlow {
                                     // Unwrap: This should never fail because the text is not Base64.
                                     let cont = CommandContinuationRequest::basic(
                                         None,
-                                        self.options.literal_accept_text.clone(),
+                                        self.options.literal_accept_text().to_static(),
                                     )
                                     .unwrap();
                                     self.send_state.enqueue_response(
