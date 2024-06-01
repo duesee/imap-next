@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use flow_test::test_setup::TestSetup;
-use imap_types::core::Text;
 
 #[test]
 fn noop() {
@@ -104,7 +103,10 @@ fn login_with_literal() {
 
     for max_literal_size in max_literal_size_tests {
         let mut setup = TestSetup::default();
-        setup.server_flow_options.literal_accept_text = Text::unvalidated("You shall pass");
+        setup
+            .server_flow_options
+            .set_literal_accept_text("You shall pass".to_string())
+            .unwrap();
         setup.server_flow_options.max_literal_size = max_literal_size;
 
         let (rt, mut server, mut client) = setup.setup_server();
@@ -137,7 +139,10 @@ fn login_with_rejected_literal() {
 
     for max_literal_size in max_literal_size_tests {
         let mut setup = TestSetup::default();
-        setup.server_flow_options.literal_reject_text = Text::unvalidated("You shall not pass");
+        setup
+            .server_flow_options
+            .set_literal_reject_text("You shall not pass".to_owned())
+            .unwrap();
         setup.server_flow_options.max_literal_size = max_literal_size;
 
         let (rt, mut server, mut client) = setup.setup_server();
@@ -199,7 +204,10 @@ fn command_with_literals_larger_than_max_command_size() {
         let max_command_size = 28;
 
         let mut setup = TestSetup::default();
-        setup.server_flow_options.literal_accept_text = Text::unvalidated("more data");
+        setup
+            .server_flow_options
+            .set_literal_accept_text("more data".to_owned())
+            .unwrap();
         // Max literal size must be smaller than max command size
         setup.server_flow_options.max_literal_size = password_size as u32;
         setup.server_flow_options.max_command_size = max_command_size as u32;

@@ -9,7 +9,6 @@ use imap_flow::{
 use imap_types::{
     bounded_static::ToBoundedStatic,
     command::{Command, CommandBody},
-    core::Text,
     extensions::idle::IdleDone,
     response::{Code, Status},
 };
@@ -213,8 +212,12 @@ impl Proxy<ConnectedState> {
         let mut client_to_proxy_flow = {
             // TODO(#144): Read options from config
             let mut options = ServerFlowOptions::default();
-            options.literal_accept_text = Text::try_from(LITERAL_ACCEPT_TEXT).unwrap();
-            options.literal_reject_text = Text::try_from(LITERAL_REJECT_TEXT).unwrap();
+            options
+                .set_literal_accept_text(LITERAL_ACCEPT_TEXT.to_string())
+                .unwrap();
+            options
+                .set_literal_reject_text(LITERAL_REJECT_TEXT.to_string())
+                .unwrap();
             ServerFlow::new(options, greeting)
         };
         let mut client_to_proxy_stream = self.state.client_to_proxy;
