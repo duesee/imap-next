@@ -31,7 +31,7 @@ It's a thin layer paving the ground for higher-level client or server implementa
 
 ## Lower-level Libraries
 
-`imap-flow` uses [`imap-codec`](https://github.com/duesee/imap-flow) internally for parsing and serialization, and re-exposes [`imap-types`](https://github.com/duesee/imap-codec/imap-types).
+`imap-flow` uses [`imap-codec`](https://github.com/duesee/imap-codec) internally for parsing and serialization, and re-exposes [`imap-types`](https://github.com/duesee/imap-codec/tree/main/imap-types).
 
 ## Higher-level Libraries
 
