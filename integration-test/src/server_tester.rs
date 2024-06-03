@@ -1,7 +1,7 @@
 use bstr::ByteSlice;
 use imap_next::{
-    server::{ServerFlow, ServerFlowError, ServerFlowEvent, ServerFlowOptions},
-    stream::{Stream, StreamError},
+    server::{self, Server},
+    stream::{self, Stream},
 };
 use imap_types::{bounded_static::ToBoundedStatic, response::Response};
 use tokio::net::TcpListener;
@@ -12,14 +12,14 @@ use crate::codecs::Codecs;
 /// Wrapper for `ServerFlow` suitable for testing.
 pub struct ServerTester {
     codecs: Codecs,
-    server_flow_options: ServerFlowOptions,
+    server_options: server::Options,
     connection_state: ConnectionState,
 }
 
 impl ServerTester {
     pub async fn new(
         codecs: Codecs,
-        server_flow_options: ServerFlowOptions,
+        server_options: server::Options,
         server_listener: TcpListener,
     ) -> Self {
         let (stream, client_address) = server_listener.accept().await.unwrap();
@@ -27,7 +27,7 @@ impl ServerTester {
         let stream = Stream::insecure(stream);
         Self {
             codecs,
-            server_flow_options,
+            server_options,
             connection_state: ConnectionState::Connected { stream },
         }
     }
@@ -36,13 +36,11 @@ impl ServerTester {
         let enqueued_greeting = self.codecs.decode_greeting_normalized(bytes);
         match self.connection_state.take() {
             ConnectionState::Connected { mut stream } => {
-                let mut server = ServerFlow::new(
-                    self.server_flow_options.clone(),
-                    enqueued_greeting.to_static(),
-                );
-                let event = stream.progress(&mut server).await.unwrap();
+                let mut server =
+                    Server::new(self.server_options.clone(), enqueued_greeting.to_static());
+                let event = stream.next(&mut server).await.unwrap();
                 match event {
-                    ServerFlowEvent::GreetingSent { greeting } => {
+                    server::Event::GreetingSent { greeting } => {
                         assert_eq!(enqueued_greeting, greeting);
                     }
                     event => {
@@ -63,9 +61,9 @@ impl ServerTester {
     pub async fn receive_command(&mut self, expected_bytes: &[u8]) {
         let expected_command = self.codecs.decode_command(expected_bytes);
         let (stream, server) = self.connection_state.greeted();
-        let event = stream.progress(server).await.unwrap();
+        let event = stream.next(server).await.unwrap();
         match event {
-            ServerFlowEvent::CommandReceived { command } => {
+            server::Event::CommandReceived { command } => {
                 assert_eq!(expected_command, command);
             }
             event => {
@@ -78,9 +76,9 @@ impl ServerTester {
         let enqueued_data = self.codecs.decode_data_normalized(bytes);
         let (stream, server) = self.connection_state.greeted();
         let enqueued_handle = server.enqueue_data(enqueued_data.to_static());
-        let event = stream.progress(server).await.unwrap();
+        let event = stream.next(server).await.unwrap();
         match event {
-            ServerFlowEvent::ResponseSent { handle, response } => {
+            server::Event::ResponseSent { handle, response } => {
                 assert_eq!(enqueued_handle, handle);
                 assert_eq!(Response::Data(enqueued_data), response);
             }
@@ -94,9 +92,9 @@ impl ServerTester {
         let enqueued_status = self.codecs.decode_status_normalized(bytes);
         let (stream, server) = self.connection_state.greeted();
         let enqueued_handle = server.enqueue_status(enqueued_status.to_static());
-        let event = stream.progress(server).await.unwrap();
+        let event = stream.next(server).await.unwrap();
         match event {
-            ServerFlowEvent::ResponseSent { handle, response } => {
+            server::Event::ResponseSent { handle, response } => {
                 assert_eq!(enqueued_handle, handle);
                 assert_eq!(Response::Status(enqueued_status), response);
             }
@@ -106,11 +104,11 @@ impl ServerTester {
         }
     }
 
-    async fn receive_error(&mut self) -> ServerFlowError {
+    async fn receive_error(&mut self) -> server::Error {
         let (stream, server) = self.connection_state.greeted();
-        let error = stream.progress(server).await.unwrap_err();
+        let error = stream.next(server).await.unwrap_err();
         match error {
-            StreamError::Flow(err) => err,
+            stream::Error::State(err) => err,
             err => {
                 panic!("Server emitted unexpected error: {err:?}");
             }
@@ -120,7 +118,7 @@ impl ServerTester {
     pub async fn receive_error_because_expected_crlf_got_lf(&mut self, expected_bytes: &[u8]) {
         let error = self.receive_error().await;
         match error {
-            ServerFlowError::ExpectedCrlfGotLf { discarded_bytes } => {
+            server::Error::ExpectedCrlfGotLf { discarded_bytes } => {
                 assert_eq!(
                     expected_bytes.as_bstr(),
                     discarded_bytes.declassify().as_bstr()
@@ -135,7 +133,7 @@ impl ServerTester {
     pub async fn receive_error_because_malformed_message(&mut self, expected_bytes: &[u8]) {
         let error = self.receive_error().await;
         match error {
-            ServerFlowError::MalformedMessage { discarded_bytes } => {
+            server::Error::MalformedMessage { discarded_bytes } => {
                 assert_eq!(
                     expected_bytes.as_bstr(),
                     discarded_bytes.declassify().as_bstr()
@@ -150,7 +148,7 @@ impl ServerTester {
     pub async fn receive_error_because_literal_too_long(&mut self, expected_bytes: &[u8]) {
         let error = self.receive_error().await;
         match error {
-            ServerFlowError::LiteralTooLong { discarded_bytes } => {
+            server::Error::LiteralTooLong { discarded_bytes } => {
                 assert_eq!(
                     expected_bytes.as_bstr(),
                     discarded_bytes.declassify().as_bstr()
@@ -165,7 +163,7 @@ impl ServerTester {
     pub async fn receive_error_because_command_too_long(&mut self, expected_bytes: &[u8]) {
         let error = self.receive_error().await;
         match error {
-            ServerFlowError::CommandTooLong { discarded_bytes } => {
+            server::Error::CommandTooLong { discarded_bytes } => {
                 assert_eq!(
                     expected_bytes.as_bstr(),
                     discarded_bytes.declassify().as_bstr()
@@ -180,7 +178,7 @@ impl ServerTester {
     /// Progresses internal responses without expecting any results.
     pub async fn progress_internal_responses<T>(&mut self) -> T {
         let (stream, server) = self.connection_state.greeted();
-        let result = stream.progress(server).await;
+        let result = stream.next(server).await;
         panic!("Server has unexpected result: {result:?}");
     }
 }
@@ -191,13 +189,13 @@ enum ConnectionState {
     // Connection to client established.
     Connected { stream: Stream },
     // Server greeted client.
-    Greeted { stream: Stream, server: ServerFlow },
+    Greeted { stream: Stream, server: Server },
     // Connection dropped.
     Disconnected,
 }
 
 impl ConnectionState {
-    fn greeted(&mut self) -> (&mut Stream, &mut ServerFlow) {
+    fn greeted(&mut self) -> (&mut Stream, &mut Server) {
         match self {
             ConnectionState::Connected { .. } => {
                 panic!("Server has not greeted yet");

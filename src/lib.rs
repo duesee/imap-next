@@ -19,27 +19,28 @@ pub mod types;
 #[cfg(doctest)]
 pub struct ReadmeDoctests;
 
-/// Common sans I/O interface used to implement I/O drivers for types that implement our protocol flows.
+/// State machine with sans I/O pattern.
 ///
-/// Most notably, [`ClientFlow`](client::ClientFlow) and [`ServerFlow`](server::ServerFlow) both implement
-/// this trait whereas [`Stream`](stream::Stream) implements the I/O drivers.
-pub trait Flow {
-    /// Event emitted while progressing the protocol flow.
+/// This trait is the interface between types that implement IMAP protocol flows and I/O drivers.
+/// Most notably [`Client`](client::Client) and [`Server`](server::Server) both implement
+/// this trait whereas [`Stream`](stream::Stream) uses the trait for implementing the I/O drivers.
+pub trait State {
+    /// Event emitted while progressing the state.
     type Event;
 
-    /// Error emitted while progressing the protocol flow.
+    /// Error emitted while progressing the state.
     type Error;
 
     /// Enqueue input bytes.
     ///
-    /// These bytes may be used during the next [`Self::progress`] call.
+    /// These bytes may be used during the next [`Self::next`] call.
     fn enqueue_input(&mut self, bytes: &[u8]);
 
-    /// Progress the protocol flow until the next event (or interrupt).
-    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>>;
+    /// Progress the state until the next event (or interrupt).
+    fn next(&mut self) -> Result<Self::Event, Interrupt<Self::Error>>;
 }
 
-impl<F: Flow> Flow for &mut F {
+impl<F: State> State for &mut F {
     type Event = F::Event;
     type Error = F::Error;
 
@@ -47,25 +48,25 @@ impl<F: Flow> Flow for &mut F {
         (*self).enqueue_input(bytes);
     }
 
-    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
-        (*self).progress()
+    fn next(&mut self) -> Result<Self::Event, Interrupt<Self::Error>> {
+        (*self).next()
     }
 }
 
-/// Protocol flow was interrupted by an event that needs to be handled externally.
-#[must_use = "If the protocol flow is interrupted the interrupt must be handled. Ignoring this might result in a deadlock on IMAP level"]
+/// State progression was interrupted by an event that needs to be handled externally.
+#[must_use = "If state progression is interrupted the interrupt must be handled. Ignoring this might result in a deadlock on IMAP level"]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum FlowInterrupt<E> {
+pub enum Interrupt<E> {
     /// An IO operation is necessary. Ignoring this might result in a deadlock on IMAP level.
-    Io(FlowIo),
+    Io(Io),
     /// An error occurred. Ignoring this might result in an undefined IMAP state.
     Error(E),
 }
 
-/// User of `imap-next` must perform an IO operation to progress the protocol flow.
+/// User of `imap-next` must perform an IO operation to progress the state.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum FlowIo {
-    /// More bytes must be read and passed to [`Flow::enqueue_input`].
+pub enum Io {
+    /// More bytes must be read and passed to [`State::enqueue_input`].
     NeedMoreInput,
     /// Given bytes must be written.
     Output(Vec<u8>),

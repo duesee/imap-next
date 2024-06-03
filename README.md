@@ -22,12 +22,13 @@ flowchart LR
     click imap-client href "https://github.com/soywod/imap-client"
 ```
 
-`imap-next` is a thin abstraction over IMAP's distinct "protocol flows".
+`imap-next` is a thin sans I/O abstraction over IMAP's distinct protocol flows.
 These are literal handling, AUTHENTICATE, and IDLE.
 
-The way these flows were defined in IMAP couples networking, parsing, and business logic.
-`imap-next` untangles these flows, providing a minimal interface allowing sending and receiving coherent messages.
+The way these protocol flows were defined in IMAP couples networking, parsing, and business logic.
+`imap-next` untangles them, providing a minimal interface allowing sending and receiving coherent messages.
 It's a thin layer paving the ground for higher-level client or server implementations.
+And it's sans I/O enabling the integration in any existing I/O runtime.
 
 ## Lower-level Libraries
 
@@ -43,7 +44,7 @@ It's a thin layer paving the ground for higher-level client or server implementa
 ```rust,no_run
 use std::error::Error;
 use imap_next::{
-    client::{ClientFlow, ClientFlowEvent, ClientFlowOptions},
+    client::{Client, Event, Options},
     stream::Stream,
 };
 use imap_types::{
@@ -55,14 +56,14 @@ use tokio::net::TcpStream;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let mut stream = Stream::insecure(TcpStream::connect("127.0.0.1:1143").await?);
-    let mut client = ClientFlow::new(ClientFlowOptions::default());
+    let mut client = Client::new(Options::default());
 
     loop {
-        match stream.progress(&mut client).await? {
+        match stream.next(&mut client).await? {
             event => {
                 println!("{event:?}");
 
-                if matches!(event, ClientFlowEvent::GreetingReceived { .. }) {
+                if matches!(event, Event::GreetingReceived { .. }) {
                     break;
                 }
             }
@@ -72,7 +73,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let handle = client.enqueue_command(Command::new("A1", CommandBody::login("Al¹cE", "pa²²w0rd")?)?);
 
     loop {
-        match stream.progress(&mut client).await? {
+        match stream.next(&mut client).await? {
             event => println!("{event:?}"),
         }
     }

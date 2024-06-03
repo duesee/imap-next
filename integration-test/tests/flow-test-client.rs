@@ -103,7 +103,7 @@ fn response_with_missing_cr() {
 #[test]
 fn crlf_relaxed() {
     let mut setup = TestSetup::default();
-    setup.client_flow_options.crlf_relaxed = true;
+    setup.client_options.crlf_relaxed = true;
 
     let (rt, mut server, mut client) = setup.setup_client();
 

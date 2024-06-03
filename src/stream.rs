@@ -16,7 +16,7 @@ use tokio_rustls::TlsStream;
 #[cfg(debug_assertions)]
 use tracing::trace;
 
-use crate::{Flow, FlowInterrupt, FlowIo};
+use crate::{Interrupt, Io, State};
 
 pub struct Stream {
     stream: TcpStream,
@@ -71,7 +71,7 @@ impl Stream {
         }
     }
 
-    pub async fn flush(&mut self) -> Result<(), StreamError<Infallible>> {
+    pub async fn flush(&mut self) -> Result<(), Error<Infallible>> {
         // Flush TLS
         if let Some(tls) = &mut self.tls {
             tls.writer().flush()?;
@@ -85,16 +85,13 @@ impl Stream {
         Ok(())
     }
 
-    pub async fn progress<F: Flow>(
-        &mut self,
-        mut flow: F,
-    ) -> Result<F::Event, StreamError<F::Error>> {
+    pub async fn next<F: State>(&mut self, mut state: F) -> Result<F::Event, Error<F::Error>> {
         let event = loop {
             match &mut self.tls {
                 None => {
                     // Provide input bytes to the client/server
                     if !self.read_buffer.is_empty() {
-                        flow.enqueue_input(&self.read_buffer);
+                        state.enqueue_input(&self.read_buffer);
                         self.read_buffer.clear();
                     }
                 }
@@ -104,13 +101,13 @@ impl Stream {
 
                     // Provide input bytes to the client/server
                     if !plain_bytes.is_empty() {
-                        flow.enqueue_input(&plain_bytes);
+                        state.enqueue_input(&plain_bytes);
                     }
                 }
             }
 
             // Progress the client/server
-            let result = flow.progress();
+            let result = state.next();
 
             // Return events immediately without doing IO
             let interrupt = match result {
@@ -120,20 +117,20 @@ impl Stream {
 
             // Return errors immediately without doing IO
             let io = match interrupt {
-                FlowInterrupt::Io(io) => io,
-                FlowInterrupt::Error(err) => return Err(StreamError::Flow(err)),
+                Interrupt::Io(io) => io,
+                Interrupt::Error(err) => return Err(Error::State(err)),
             };
 
             match &mut self.tls {
                 None => {
                     // Handle the output bytes from the client/server
-                    if let FlowIo::Output(bytes) = io {
+                    if let Io::Output(bytes) = io {
                         self.write_buffer.extend(bytes);
                     }
                 }
                 Some(tls) => {
                     // Handle the output bytes from the client/server
-                    let plain_bytes = if let FlowIo::Output(bytes) = io {
+                    let plain_bytes = if let Io::Output(bytes) = io {
                         bytes
                     } else {
                         Vec::new()
@@ -184,7 +181,7 @@ impl From<Stream> for TcpStream {
 
 /// Error during reading into or writing from a stream.
 #[derive(Debug, Error)]
-pub enum StreamError<E> {
+pub enum Error<E> {
     /// Operation failed because stream is closed.
     ///
     /// We detect this by checking if the read or written byte count is 0. Whether the stream is
@@ -197,9 +194,9 @@ pub enum StreamError<E> {
     /// An error occurred in the underlying TLS connection.
     #[error(transparent)]
     Tls(#[from] rustls::Error),
-    /// An error occurred in the IMAP flow.
+    /// An error occurred while progressing the state.
     #[error(transparent)]
-    Flow(E),
+    State(E),
 }
 
 async fn read<S: AsyncRead + Unpin>(
@@ -257,11 +254,11 @@ enum ReadWriteError {
     Io(#[from] tokio::io::Error),
 }
 
-impl<E> From<ReadWriteError> for StreamError<E> {
+impl<E> From<ReadWriteError> for Error<E> {
     fn from(value: ReadWriteError) -> Self {
         match value {
-            ReadWriteError::Closed => StreamError::Closed,
-            ReadWriteError::Io(err) => StreamError::Io(err),
+            ReadWriteError::Closed => Error::Closed,
+            ReadWriteError::Io(err) => Error::Io(err),
         }
     }
 }
@@ -321,11 +318,11 @@ enum DecryptEncryptError {
     Tls(#[from] rustls::Error),
 }
 
-impl<E> From<DecryptEncryptError> for StreamError<E> {
+impl<E> From<DecryptEncryptError> for Error<E> {
     fn from(value: DecryptEncryptError) -> Self {
         match value {
-            DecryptEncryptError::Io(err) => StreamError::Io(err),
-            DecryptEncryptError::Tls(err) => StreamError::Tls(err),
+            DecryptEncryptError::Io(err) => Error::Io(err),
+            DecryptEncryptError::Tls(err) => Error::Tls(err),
         }
     }
 }

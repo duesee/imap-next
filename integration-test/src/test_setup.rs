@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use imap_next::{client::ClientFlowOptions, server::ServerFlowOptions};
+use imap_next::{client, server};
 use tokio::net::TcpListener;
 use tracing::trace;
 use tracing_subscriber::EnvFilter;
@@ -19,8 +19,8 @@ use crate::{
 #[non_exhaustive]
 pub struct TestSetup {
     pub codecs: Codecs,
-    pub server_flow_options: ServerFlowOptions,
-    pub client_flow_options: ClientFlowOptions,
+    pub server_options: server::Options,
+    pub client_options: client::Options,
     pub runtime_options: RuntimeOptions,
     pub init_logging: bool,
 }
@@ -38,7 +38,7 @@ impl TestSetup {
 
         let (server, client) = rt.run2(
             Mock::server(server_listener),
-            ClientTester::new(self.codecs, self.client_flow_options, server_address),
+            ClientTester::new(self.codecs, self.client_options, server_address),
         );
 
         (rt, server, client)
@@ -55,7 +55,7 @@ impl TestSetup {
         let (server_listener, server_address) = rt.run(bind_address());
 
         let (server, client) = rt.run2(
-            ServerTester::new(self.codecs, self.server_flow_options, server_listener),
+            ServerTester::new(self.codecs, self.server_options, server_listener),
             Mock::client(server_address),
         );
 
@@ -73,12 +73,8 @@ impl TestSetup {
         let (server_listener, server_address) = rt.run(bind_address());
 
         let (server, client) = rt.run2(
-            ServerTester::new(
-                self.codecs.clone(),
-                self.server_flow_options,
-                server_listener,
-            ),
-            ClientTester::new(self.codecs, self.client_flow_options, server_address),
+            ServerTester::new(self.codecs.clone(), self.server_options, server_listener),
+            ClientTester::new(self.codecs, self.client_options, server_address),
         );
 
         (rt, server, client)
@@ -89,8 +85,8 @@ impl Default for TestSetup {
     fn default() -> Self {
         Self {
             codecs: Codecs::default(),
-            server_flow_options: ServerFlowOptions::default(),
-            client_flow_options: ClientFlowOptions::default(),
+            server_options: server::Options::default(),
+            client_options: client::Options::default(),
             runtime_options: RuntimeOptions::default(),
             init_logging: true,
         }

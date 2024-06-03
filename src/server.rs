@@ -24,15 +24,15 @@ use crate::{
     server_receive::{NextExpectedMessage, ServerReceiveState},
     server_send::{ServerSendEvent, ServerSendState},
     types::CommandAuthenticate,
-    Flow, FlowInterrupt,
+    Interrupt, State,
 };
 
-static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ServerFlowResponseHandle> =
+static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ResponseHandle> =
     HandleGeneratorGenerator::new();
 
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
-pub struct ServerFlowOptions {
+pub struct Options {
     pub crlf_relaxed: bool,
     /// Max literal size accepted by server.
     ///
@@ -50,7 +50,7 @@ pub struct ServerFlowOptions {
     literal_reject_ccr: CommandContinuationRequest<'static>,
 }
 
-impl Default for ServerFlowOptions {
+impl Default for Options {
     fn default() -> Self {
         Self {
             // Lean towards conformity
@@ -70,7 +70,7 @@ impl Default for ServerFlowOptions {
     }
 }
 
-impl ServerFlowOptions {
+impl Options {
     pub fn literal_accept_text(&self) -> &Text {
         match self.literal_accept_ccr {
             CommandContinuationRequest::Basic(ref basic) => basic.text(),
@@ -110,15 +110,15 @@ impl ServerFlowOptions {
     }
 }
 
-pub struct ServerFlow {
-    options: ServerFlowOptions,
-    handle_generator: HandleGenerator<ServerFlowResponseHandle>,
+pub struct Server {
+    options: Options,
+    handle_generator: HandleGenerator<ResponseHandle>,
     send_state: ServerSendState,
     receive_state: ServerReceiveState,
 }
 
-impl ServerFlow {
-    pub fn new(options: ServerFlowOptions, greeting: Greeting<'static>) -> Self {
+impl Server {
+    pub fn new(options: Options, greeting: Greeting<'static>) -> Self {
         let mut send_state =
             ServerSendState::new(GreetingCodec::default(), ResponseCodec::default());
 
@@ -138,22 +138,12 @@ impl ServerFlow {
         }
     }
 
-    pub fn enqueue_input(&mut self, bytes: &[u8]) {
-        match &mut self.receive_state {
-            ServerReceiveState::Command(state) => state.enqueue_input(bytes),
-            ServerReceiveState::AuthenticateData(state) => state.enqueue_input(bytes),
-            ServerReceiveState::IdleAccept(state) => state.enqueue_input(bytes),
-            ServerReceiveState::IdleDone(state) => state.enqueue_input(bytes),
-            ServerReceiveState::Dummy => unreachable!(),
-        }
-    }
-
     /// Enqueues the [`Data`] response for being sent to the client.
     ///
     /// The response is not sent immediately but during one of the next calls of
-    /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
+    /// [`Server::next`]. All responses are sent in the same order they have been
     /// enqueued.
-    pub fn enqueue_data(&mut self, data: Data<'static>) -> ServerFlowResponseHandle {
+    pub fn enqueue_data(&mut self, data: Data<'static>) -> ResponseHandle {
         let handle = self.handle_generator.generate();
         self.send_state
             .enqueue_response(Some(handle), Response::Data(data));
@@ -163,9 +153,9 @@ impl ServerFlow {
     /// Enqueues the [`Status`] response for being sent to the client.
     ///
     /// The response is not sent immediately but during one of the next calls of
-    /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
+    /// [`Server::next`]. All responses are sent in the same order they have been
     /// enqueued.
-    pub fn enqueue_status(&mut self, status: Status<'static>) -> ServerFlowResponseHandle {
+    pub fn enqueue_status(&mut self, status: Status<'static>) -> ResponseHandle {
         let handle = self.handle_generator.generate();
         self.send_state
             .enqueue_response(Some(handle), Response::Status(status));
@@ -175,12 +165,12 @@ impl ServerFlow {
     /// Enqueues the [`CommandContinuationRequest`] response for being sent to the client.
     ///
     /// The response is not sent immediately but during one of the next calls of
-    /// [`ServerFlow::progress`]. All responses are sent in the same order they have been
+    /// [`Server::next`]. All responses are sent in the same order they have been
     /// enqueued.
     pub fn enqueue_continuation_request(
         &mut self,
         continuation_request: CommandContinuationRequest<'static>,
-    ) -> ServerFlowResponseHandle {
+    ) -> ResponseHandle {
         let handle = self.handle_generator.generate();
         self.send_state.enqueue_response(
             Some(handle),
@@ -189,30 +179,18 @@ impl ServerFlow {
         handle
     }
 
-    pub fn progress(&mut self) -> Result<ServerFlowEvent, FlowInterrupt<ServerFlowError>> {
-        loop {
-            if let Some(event) = self.progress_send()? {
-                return Ok(event);
-            }
-
-            if let Some(event) = self.progress_receive()? {
-                return Ok(event);
-            }
-        }
-    }
-
-    fn progress_send(&mut self) -> Result<Option<ServerFlowEvent>, FlowInterrupt<ServerFlowError>> {
-        match self.send_state.progress() {
+    fn progress_send(&mut self) -> Result<Option<Event>, Interrupt<Error>> {
+        match self.send_state.next() {
             Ok(Some(ServerSendEvent::Greeting { greeting })) => {
                 // The initial greeting was sucessfully sent, inform the caller
-                Ok(Some(ServerFlowEvent::GreetingSent { greeting }))
+                Ok(Some(Event::GreetingSent { greeting }))
             }
             Ok(Some(ServerSendEvent::Response {
                 handle: Some(handle),
                 response,
             })) => {
                 // A response was sucessfully sent, inform the caller
-                Ok(Some(ServerFlowEvent::ResponseSent { handle, response }))
+                Ok(Some(Event::ResponseSent { handle, response }))
             }
             Ok(Some(ServerSendEvent::Response { handle: None, .. })) => {
                 // An internally created response was sent, don't inform the caller
@@ -222,17 +200,15 @@ impl ServerFlow {
                 // No progress yet
                 Ok(None)
             }
-            Err(FlowInterrupt::Io(io)) => Err(FlowInterrupt::Io(io)),
-            Err(FlowInterrupt::Error(_)) => unreachable!(),
+            Err(Interrupt::Io(io)) => Err(Interrupt::Io(io)),
+            Err(Interrupt::Error(_)) => unreachable!(),
         }
     }
 
-    fn progress_receive(
-        &mut self,
-    ) -> Result<Option<ServerFlowEvent>, FlowInterrupt<ServerFlowError>> {
+    fn progress_receive(&mut self) -> Result<Option<Event>, Interrupt<Error>> {
         match &mut self.receive_state {
             ServerReceiveState::Command(state) => {
-                match state.progress() {
+                match state.next() {
                     Ok(ReceiveEvent::DecodingSuccess(command)) => {
                         state.finish_message();
 
@@ -244,7 +220,7 @@ impl ServerFlow {
                                 self.receive_state
                                     .change_state(NextExpectedMessage::AuthenticateData);
 
-                                Ok(Some(ServerFlowEvent::CommandAuthenticateReceived {
+                                Ok(Some(Event::CommandAuthenticateReceived {
                                     command_authenticate: CommandAuthenticate {
                                         tag: command.tag,
                                         mechanism,
@@ -256,11 +232,9 @@ impl ServerFlow {
                                 self.receive_state
                                     .change_state(NextExpectedMessage::IdleAccept);
 
-                                Ok(Some(ServerFlowEvent::IdleCommandReceived {
-                                    tag: command.tag,
-                                }))
+                                Ok(Some(Event::IdleCommandReceived { tag: command.tag }))
                             }
-                            body => Ok(Some(ServerFlowEvent::CommandReceived {
+                            body => Ok(Some(Event::CommandReceived {
                                 command: Command {
                                     tag: command.tag,
                                     body,
@@ -268,8 +242,8 @@ impl ServerFlow {
                             })),
                         }
                     }
-                    Err(FlowInterrupt::Io(io)) => Err(FlowInterrupt::Io(io)),
-                    Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
+                    Err(Interrupt::Io(io)) => Err(Interrupt::Io(io)),
+                    Err(Interrupt::Error(ReceiveError::DecodingFailure(
                         CommandDecodeError::LiteralFound { tag, length, mode },
                     ))) => {
                         if length > self.options.max_literal_size {
@@ -289,7 +263,7 @@ impl ServerFlow {
 
                                     let discarded_bytes = state.discard_message();
 
-                                    Err(FlowInterrupt::Error(ServerFlowError::LiteralTooLong {
+                                    Err(Interrupt::Error(Error::LiteralTooLong {
                                         discarded_bytes: Secret::new(discarded_bytes),
                                     }))
                                 }
@@ -304,7 +278,7 @@ impl ServerFlow {
                                     //       The LITERAL+ RFC has some recommendations.
                                     let discarded_bytes = state.discard_message();
 
-                                    Err(FlowInterrupt::Error(ServerFlowError::LiteralTooLong {
+                                    Err(Interrupt::Error(Error::LiteralTooLong {
                                         discarded_bytes: Secret::new(discarded_bytes),
                                     }))
                                 }
@@ -336,90 +310,88 @@ impl ServerFlow {
                             Ok(None)
                         }
                     }
-                    Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
+                    Err(Interrupt::Error(ReceiveError::DecodingFailure(
                         CommandDecodeError::Failed | CommandDecodeError::Incomplete,
                     ))) => {
                         let discarded_bytes = state.discard_message();
-                        Err(FlowInterrupt::Error(ServerFlowError::MalformedMessage {
+                        Err(Interrupt::Error(Error::MalformedMessage {
                             discarded_bytes: Secret::new(discarded_bytes),
                         }))
                     }
-                    Err(FlowInterrupt::Error(ReceiveError::ExpectedCrlfGotLf)) => {
+                    Err(Interrupt::Error(ReceiveError::ExpectedCrlfGotLf)) => {
                         let discarded_bytes = state.discard_message();
-                        Err(FlowInterrupt::Error(ServerFlowError::ExpectedCrlfGotLf {
+                        Err(Interrupt::Error(Error::ExpectedCrlfGotLf {
                             discarded_bytes: Secret::new(discarded_bytes),
                         }))
                     }
-                    Err(FlowInterrupt::Error(ReceiveError::MessageTooLong)) => {
+                    Err(Interrupt::Error(ReceiveError::MessageTooLong)) => {
                         let discarded_bytes = state.discard_message();
-                        Err(FlowInterrupt::Error(ServerFlowError::CommandTooLong {
+                        Err(Interrupt::Error(Error::CommandTooLong {
                             discarded_bytes: Secret::new(discarded_bytes),
                         }))
                     }
                 }
             }
-            ServerReceiveState::AuthenticateData(state) => match state.progress() {
+            ServerReceiveState::AuthenticateData(state) => match state.next() {
                 Ok(ReceiveEvent::DecodingSuccess(authenticate_data)) => {
                     state.finish_message();
-                    Ok(Some(ServerFlowEvent::AuthenticateDataReceived {
-                        authenticate_data,
-                    }))
+                    Ok(Some(Event::AuthenticateDataReceived { authenticate_data }))
                 }
-                Err(FlowInterrupt::Io(io)) => Err(FlowInterrupt::Io(io)),
-                Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
+                Err(Interrupt::Io(io)) => Err(Interrupt::Io(io)),
+                Err(Interrupt::Error(ReceiveError::DecodingFailure(
                     AuthenticateDataDecodeError::Failed | AuthenticateDataDecodeError::Incomplete,
                 ))) => {
                     let discarded_bytes = state.discard_message();
-                    Err(FlowInterrupt::Error(ServerFlowError::MalformedMessage {
+                    Err(Interrupt::Error(Error::MalformedMessage {
                         discarded_bytes: Secret::new(discarded_bytes),
                     }))
                 }
-                Err(FlowInterrupt::Error(ReceiveError::ExpectedCrlfGotLf)) => {
+                Err(Interrupt::Error(ReceiveError::ExpectedCrlfGotLf)) => {
                     let discarded_bytes = state.discard_message();
-                    Err(FlowInterrupt::Error(ServerFlowError::ExpectedCrlfGotLf {
+                    Err(Interrupt::Error(Error::ExpectedCrlfGotLf {
                         discarded_bytes: Secret::new(discarded_bytes),
                     }))
                 }
-                Err(FlowInterrupt::Error(ReceiveError::MessageTooLong)) => {
+                Err(Interrupt::Error(ReceiveError::MessageTooLong)) => {
                     let discarded_bytes = state.discard_message();
-                    Err(FlowInterrupt::Error(ServerFlowError::CommandTooLong {
+                    Err(Interrupt::Error(Error::CommandTooLong {
                         discarded_bytes: Secret::new(discarded_bytes),
                     }))
                 }
             },
             ServerReceiveState::IdleAccept(_) => {
-                // We don't expect any message until the server flow user calls
+                // We don't expect any message until the server user calls
                 // `idle_accept` or `idle_reject`.
                 // TODO: It's strange to return NeedMoreInput here, but it works for now.
-                Err(FlowInterrupt::Io(crate::FlowIo::NeedMoreInput))
+                Err(Interrupt::Io(crate::Io::NeedMoreInput))
             }
-            ServerReceiveState::IdleDone(state) => match state.progress() {
+            ServerReceiveState::IdleDone(state) => match state.next() {
                 Ok(ReceiveEvent::DecodingSuccess(IdleDone)) => {
                     state.finish_message();
 
                     self.receive_state
                         .change_state(NextExpectedMessage::Command);
 
-                    Ok(Some(ServerFlowEvent::IdleDoneReceived))
+                    Ok(Some(Event::IdleDoneReceived))
                 }
-                Err(FlowInterrupt::Io(io)) => Err(FlowInterrupt::Io(io)),
-                Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
+                Err(Interrupt::Io(io)) => Err(Interrupt::Io(io)),
+                Err(Interrupt::Error(ReceiveError::DecodingFailure(
                     IdleDoneDecodeError::Failed | IdleDoneDecodeError::Incomplete,
                 ))) => {
                     let discarded_bytes = state.discard_message();
-                    Err(FlowInterrupt::Error(ServerFlowError::MalformedMessage {
+                    Err(Interrupt::Error(Error::MalformedMessage {
                         discarded_bytes: Secret::new(discarded_bytes),
                     }))
                 }
-                Err(FlowInterrupt::Error(ReceiveError::ExpectedCrlfGotLf)) => {
+                Err(Interrupt::Error(ReceiveError::ExpectedCrlfGotLf)) => {
                     let discarded_bytes = state.discard_message();
-                    Err(FlowInterrupt::Error(ServerFlowError::ExpectedCrlfGotLf {
+                    Err(Interrupt::Error(Error::ExpectedCrlfGotLf {
                         discarded_bytes: Secret::new(discarded_bytes),
                     }))
                 }
-                Err(FlowInterrupt::Error(ReceiveError::MessageTooLong)) => {
+                Err(Interrupt::Error(ReceiveError::MessageTooLong)) => {
                     let discarded_bytes = state.discard_message();
-                    Err(FlowInterrupt::Error(ServerFlowError::CommandTooLong {
+                    Err(Interrupt::Error(Error::CommandTooLong {
                         discarded_bytes: Secret::new(discarded_bytes),
                     }))
                 }
@@ -433,7 +405,7 @@ impl ServerFlow {
     pub fn authenticate_continue(
         &mut self,
         continuation_request: CommandContinuationRequest<'static>,
-    ) -> Result<ServerFlowResponseHandle, CommandContinuationRequest<'static>> {
+    ) -> Result<ResponseHandle, CommandContinuationRequest<'static>> {
         if let ServerReceiveState::AuthenticateData { .. } = self.receive_state {
             let handle = self.enqueue_continuation_request(continuation_request);
             Ok(handle)
@@ -445,7 +417,7 @@ impl ServerFlow {
     pub fn authenticate_finish(
         &mut self,
         status: Status<'static>,
-    ) -> Result<ServerFlowResponseHandle, Status<'static>> {
+    ) -> Result<ResponseHandle, Status<'static>> {
         if let ServerReceiveState::AuthenticateData(_) = &mut self.receive_state {
             let handle = self.enqueue_status(status);
 
@@ -461,7 +433,7 @@ impl ServerFlow {
     pub fn idle_accept(
         &mut self,
         continuation_request: CommandContinuationRequest<'static>,
-    ) -> Result<ServerFlowResponseHandle, CommandContinuationRequest<'static>> {
+    ) -> Result<ResponseHandle, CommandContinuationRequest<'static>> {
         if let ServerReceiveState::IdleAccept(_) = &mut self.receive_state {
             let handle = self.enqueue_continuation_request(continuation_request);
 
@@ -477,7 +449,7 @@ impl ServerFlow {
     pub fn idle_reject(
         &mut self,
         status: Status<'static>,
-    ) -> Result<ServerFlowResponseHandle, Status<'static>> {
+    ) -> Result<ResponseHandle, Status<'static>> {
         if let ServerReceiveState::IdleAccept(_) = &mut self.receive_state {
             let handle = self.enqueue_status(status);
 
@@ -491,55 +463,69 @@ impl ServerFlow {
     }
 }
 
-impl Debug for ServerFlow {
+impl Debug for Server {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        f.debug_struct("ServerFlow")
+        f.debug_struct("Server")
             .field("options", &self.options)
             .field("handle_generator", &self.handle_generator)
             .finish_non_exhaustive()
     }
 }
 
-impl Flow for ServerFlow {
-    type Event = ServerFlowEvent;
-    type Error = ServerFlowError;
+impl State for Server {
+    type Event = Event;
+    type Error = Error;
 
     fn enqueue_input(&mut self, bytes: &[u8]) {
-        self.enqueue_input(bytes)
+        match &mut self.receive_state {
+            ServerReceiveState::Command(state) => state.enqueue_input(bytes),
+            ServerReceiveState::AuthenticateData(state) => state.enqueue_input(bytes),
+            ServerReceiveState::IdleAccept(state) => state.enqueue_input(bytes),
+            ServerReceiveState::IdleDone(state) => state.enqueue_input(bytes),
+            ServerReceiveState::Dummy => unreachable!(),
+        }
     }
 
-    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
-        self.progress()
+    fn next(&mut self) -> Result<Self::Event, Interrupt<Self::Error>> {
+        loop {
+            if let Some(event) = self.progress_send()? {
+                return Ok(event);
+            }
+
+            if let Some(event) = self.progress_receive()? {
+                return Ok(event);
+            }
+        }
     }
 }
 
 /// Handle for enqueued [`Response`].
 ///
 /// This handle can be used to track the sending progress. After a [`Response`] was enqueued via
-/// [`ServerFlow::enqueue_data`] or [`ServerFlow::enqueue_status`] it is in the process of being
-/// sent until [`ServerFlow::progress`] returns a [`ServerFlowEvent::ResponseSent`] with the
+/// [`Server::enqueue_data`] or [`Server::enqueue_status`] it is in the process of being
+/// sent until [`Server::next`] returns a [`Event::ResponseSent`] with the
 /// corresponding handle.
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
-pub struct ServerFlowResponseHandle(RawHandle);
+pub struct ResponseHandle(RawHandle);
 
 // Implement a short debug representation that hides the underlying raw handle
-impl Debug for ServerFlowResponseHandle {
+impl Debug for ResponseHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ServerFlowResponseHandle")
+        f.debug_tuple("ResponseHandle")
             .field(&self.0.generator_id())
             .field(&self.0.handle_id())
             .finish()
     }
 }
 
-impl Handle for ServerFlowResponseHandle {
+impl Handle for ResponseHandle {
     fn from_raw(raw_handle: RawHandle) -> Self {
         Self(raw_handle)
     }
 }
 
 #[derive(Debug)]
-pub enum ServerFlowEvent {
+pub enum Event {
     /// Initial [`Greeting] was sent successfully.
     GreetingSent {
         greeting: Greeting<'static>,
@@ -547,7 +533,7 @@ pub enum ServerFlowEvent {
     /// Enqueued [`Response`] was sent successfully.
     ResponseSent {
         /// Handle of the formerly enqueued [`Response`].
-        handle: ServerFlowResponseHandle,
+        handle: ResponseHandle,
         /// Formerly enqueued [`Response`] that was now sent.
         response: Response<'static>,
     },
@@ -557,8 +543,8 @@ pub enum ServerFlowEvent {
     },
     /// Command AUTHENTICATE received.
     ///
-    /// Note: The server MUST call [`ServerFlow::authenticate_continue`] (if it needs more data for
-    /// authentication) or [`ServerFlow::authenticate_finish`] (if there already is enough data for
+    /// Note: The server MUST call [`Server::authenticate_continue`] (if it needs more data for
+    /// authentication) or [`Server::authenticate_finish`] (if there already is enough data for
     /// authentication) next. "Enough data" is determined by the used SASL mechanism, if there was
     /// an initial response (SASL-IR), etc.
     CommandAuthenticateReceived {
@@ -566,8 +552,8 @@ pub enum ServerFlowEvent {
     },
     /// Continuation to AUTHENTICATE received.
     ///
-    /// Note: The server MUST call [`ServerFlow::authenticate_continue`] (if it needs more data for
-    /// authentication) or [`ServerFlow::authenticate_finish`] (if there already is enough data for
+    /// Note: The server MUST call [`Server::authenticate_continue`] (if it needs more data for
+    /// authentication) or [`Server::authenticate_finish`] (if there already is enough data for
     /// authentication) next. "Enough data" is determined by the used SASL mechanism, if there was
     /// an initial response (SASL-IR), etc.
     ///
@@ -584,7 +570,7 @@ pub enum ServerFlowEvent {
 }
 
 #[derive(Debug, Error)]
-pub enum ServerFlowError {
+pub enum Error {
     #[error("Expected `\\r\\n`, got `\\n`")]
     ExpectedCrlfGotLf { discarded_bytes: Secret<Box<[u8]>> },
     #[error("Received malformed message")]

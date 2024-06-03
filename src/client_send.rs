@@ -13,7 +13,7 @@ use imap_types::{
 };
 use tracing::warn;
 
-use crate::{client::ClientFlowCommandHandle, types::CommandAuthenticate, FlowInterrupt, FlowIo};
+use crate::{client::CommandHandle, types::CommandAuthenticate, Interrupt, Io};
 
 pub struct ClientSendState {
     command_codec: CommandCodec,
@@ -40,7 +40,7 @@ impl ClientSendState {
         }
     }
 
-    pub fn enqueue_command(&mut self, handle: ClientFlowCommandHandle, command: Command<'static>) {
+    pub fn enqueue_command(&mut self, handle: CommandHandle, command: Command<'static>) {
         self.queued_messages
             .push_back(QueuedMessage { handle, command });
     }
@@ -155,7 +155,7 @@ impl ClientSendState {
     }
 
     /// Handles the received continuation request for an authenticate data.
-    pub fn authenticate_continue(&mut self) -> Option<ClientFlowCommandHandle> {
+    pub fn authenticate_continue(&mut self) -> Option<CommandHandle> {
         // Check whether in correct state
         let current_message = self.current_message.take()?;
         let CurrentMessage::Authenticate(state) = current_message else {
@@ -180,7 +180,7 @@ impl ClientSendState {
     pub fn set_authenticate_data(
         &mut self,
         authenticate_data: AuthenticateData<'static>,
-    ) -> Result<ClientFlowCommandHandle, AuthenticateData<'static>> {
+    ) -> Result<CommandHandle, AuthenticateData<'static>> {
         // Check whether in correct state
         let Some(current_message) = self.current_message.take() else {
             return Err(authenticate_data);
@@ -215,7 +215,7 @@ impl ClientSendState {
     }
 
     /// Handles the received continuation request for the idle done.
-    pub fn idle_continue(&mut self) -> Option<ClientFlowCommandHandle> {
+    pub fn idle_continue(&mut self) -> Option<CommandHandle> {
         // Check whether in correct state
         let current_message = self.current_message.take()?;
         let CurrentMessage::Idle(state) = current_message else {
@@ -237,7 +237,7 @@ impl ClientSendState {
     }
 
     /// Sends the requested idle done to the server.
-    pub fn set_idle_done(&mut self) -> Option<ClientFlowCommandHandle> {
+    pub fn set_idle_done(&mut self) -> Option<CommandHandle> {
         // Check whether in correct state
         let current_message = self.current_message.take()?;
         let CurrentMessage::Idle(state) = current_message else {
@@ -270,14 +270,14 @@ impl ClientSendState {
         Some(handle)
     }
 
-    pub fn progress(&mut self) -> Result<Option<ClientSendEvent>, FlowInterrupt<Infallible>> {
+    pub fn next(&mut self) -> Result<Option<ClientSendEvent>, Interrupt<Infallible>> {
         let current_message = match self.current_message.take() {
             Some(current_message) => {
                 // We are currently sending a message but the sending process was aborted for one
                 // of these reasons:
-                // - The flow was interrupted
+                // - The state was interrupted
                 // - The server must send a continuation request or a status
-                // - The client flow user must provide more data
+                // - The client user must provide more data
                 // Continue the sending process.
                 current_message
             }
@@ -317,15 +317,15 @@ impl ClientSendState {
             // Store the current message, we'll continue later
             self.current_message = Some(current_message);
 
-            // Interrupt the flow for sendng all bytes of current message
-            Err(FlowInterrupt::Io(FlowIo::Output(write_buffer)))
+            // Interrupt the state for sending all bytes of current message
+            Err(Interrupt::Io(Io::Output(write_buffer)))
         }
     }
 }
 
 /// Queued (and not sent yet) message.
 struct QueuedMessage {
-    handle: ClientFlowCommandHandle,
+    handle: CommandHandle,
     command: Command<'static>,
 }
 
@@ -442,7 +442,7 @@ impl<S> FinishSendingResult<S> {
 }
 
 struct CommandState {
-    handle: ClientFlowCommandHandle,
+    handle: CommandHandle,
     command: Command<'static>,
     /// Outstanding command fragments that needs to be sent.
     fragments: VecDeque<Fragment>,
@@ -541,7 +541,7 @@ enum CommandActivity {
 }
 
 struct AuthenticateState {
-    handle: ClientFlowCommandHandle,
+    handle: CommandHandle,
     command_authenticate: CommandAuthenticate,
     activity: AuthenticateActivity,
 }
@@ -599,9 +599,9 @@ enum AuthenticateActivity {
     /// Waiting until the server requests more authenticate data via continuation request or
     /// accepts/rejects the authenticate command via status.
     WaitingForAuthenticateResponse,
-    /// Waiting until the client flow user provides the authenticate data.
+    /// Waiting until the client user provides the authenticate data.
     ///
-    /// Specifically, [`ClientFlow::set_authenticate_data`](crate::client::ClientFlow::set_authenticate_data).
+    /// Specifically, [`Client::set_authenticate_data`](crate::client::Client::set_authenticate_data).
     WaitingForAuthenticateDataSet,
     /// Pushing the authenticate data to the write buffer.
     PushingAuthenticateData { authenticate_data: Vec<u8> },
@@ -610,7 +610,7 @@ enum AuthenticateActivity {
 }
 
 struct IdleState {
-    handle: ClientFlowCommandHandle,
+    handle: CommandHandle,
     tag: Tag<'static>,
     activity: IdleActivity,
 }
@@ -664,9 +664,9 @@ enum IdleActivity {
     /// Waiting until the server accepts the idle command via continuation request or rejects it
     /// via status.
     WaitingForIdleResponse,
-    /// Waiting until the client flow user triggers idle done.
+    /// Waiting until the client user triggers idle done.
     ///
-    /// Specifically, [`ClientFlow::set_idle_done`](crate::client::ClientFlow::set_idle_done).
+    /// Specifically, [`Client::set_idle_done`](crate::client::Client::set_idle_done).
     WaitingForIdleDoneSet,
     /// Pushing the idle done to the write buffer.
     PushingIdleDone { idle_done: Vec<u8> },
@@ -677,17 +677,17 @@ enum IdleActivity {
 /// Message sent.
 pub enum ClientSendEvent {
     Command {
-        handle: ClientFlowCommandHandle,
+        handle: CommandHandle,
         command: Command<'static>,
     },
     Authenticate {
-        handle: ClientFlowCommandHandle,
+        handle: CommandHandle,
     },
     Idle {
-        handle: ClientFlowCommandHandle,
+        handle: CommandHandle,
     },
     IdleDone {
-        handle: ClientFlowCommandHandle,
+        handle: CommandHandle,
     },
 }
 
@@ -695,19 +695,19 @@ pub enum ClientSendEvent {
 pub enum ClientSendTermination {
     /// Command was terminated because its literal was rejected by the server.
     LiteralRejected {
-        handle: ClientFlowCommandHandle,
+        handle: CommandHandle,
         command: Command<'static>,
     },
     /// Authenticate command was accepted.
     AuthenticateAccepted {
-        handle: ClientFlowCommandHandle,
+        handle: CommandHandle,
         command_authenticate: CommandAuthenticate,
     },
     /// Authenticate command was rejected.
     AuthenticateRejected {
-        handle: ClientFlowCommandHandle,
+        handle: CommandHandle,
         command_authenticate: CommandAuthenticate,
     },
     /// Idle command was rejected.
-    IdleRejected { handle: ClientFlowCommandHandle },
+    IdleRejected { handle: CommandHandle },
 }

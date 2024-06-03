@@ -2,7 +2,7 @@ use bounded_static::IntoBoundedStatic;
 use bytes::{Buf, BytesMut};
 use imap_codec::decode::Decoder;
 
-use crate::{FlowInterrupt, FlowIo};
+use crate::{Interrupt, Io};
 
 pub struct ReceiveState<C> {
     codec: C,
@@ -60,7 +60,7 @@ impl<C> ReceiveState<C> {
         discarded_bytes
     }
 
-    pub fn progress(&mut self) -> Result<ReceiveEvent<C>, FlowInterrupt<ReceiveError<C>>>
+    pub fn next(&mut self) -> Result<ReceiveEvent<C>, Interrupt<ReceiveError<C>>>
     where
         C: Decoder,
         for<'a> C::Message<'a>: IntoBoundedStatic<Static = C::Message<'static>>,
@@ -81,7 +81,7 @@ impl<C> ReceiveState<C> {
     fn progress_line(
         &mut self,
         seen_bytes_in_line: usize,
-    ) -> Result<ReceiveEvent<C>, FlowInterrupt<ReceiveError<C>>>
+    ) -> Result<ReceiveEvent<C>, Interrupt<ReceiveError<C>>>
     where
         C: Decoder,
         for<'a> C::Message<'a>: IntoBoundedStatic<Static = C::Message<'static>>,
@@ -103,11 +103,11 @@ impl<C> ReceiveState<C> {
             // Abort if we can't request more data.
             if Some(max_readable_bytes) == self.max_message_size.map(|size| size as usize) {
                 self.seen_bytes = max_readable_bytes;
-                return Err(FlowInterrupt::Error(ReceiveError::MessageTooLong));
+                return Err(Interrupt::Error(ReceiveError::MessageTooLong));
             }
 
             // Request more data.
-            return Err(FlowInterrupt::Io(FlowIo::NeedMoreInput));
+            return Err(Interrupt::Io(Io::NeedMoreInput));
         };
 
         // Mark the all bytes of the current line as seen.
@@ -115,7 +115,7 @@ impl<C> ReceiveState<C> {
         self.next_fragment = NextFragment::start_new_line();
 
         if crlf_result.expected_crlf_got_lf {
-            return Err(FlowInterrupt::Error(ReceiveError::ExpectedCrlfGotLf));
+            return Err(Interrupt::Error(ReceiveError::ExpectedCrlfGotLf));
         }
 
         // Try to parse the whole message from the start (including the new line).
@@ -127,16 +127,13 @@ impl<C> ReceiveState<C> {
                 assert!(remaining.is_empty());
                 Ok(ReceiveEvent::DecodingSuccess(message.into_static()))
             }
-            Err(error) => Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
+            Err(error) => Err(Interrupt::Error(ReceiveError::DecodingFailure(
                 error.into_static(),
             ))),
         }
     }
 
-    fn progress_literal(
-        &mut self,
-        literal_length: u32,
-    ) -> Result<(), FlowInterrupt<ReceiveError<C>>>
+    fn progress_literal(&mut self, literal_length: u32) -> Result<(), Interrupt<ReceiveError<C>>>
     where
         C: Decoder,
     {
@@ -149,11 +146,11 @@ impl<C> ReceiveState<C> {
             // Abort if we can't request more data.
             if Some(max_readable_bytes) == self.max_message_size.map(|size| size as usize) {
                 self.seen_bytes = max_readable_bytes;
-                return Err(FlowInterrupt::Error(ReceiveError::MessageTooLong));
+                return Err(Interrupt::Error(ReceiveError::MessageTooLong));
             }
 
             // Request more data.
-            return Err(FlowInterrupt::Io(FlowIo::NeedMoreInput));
+            return Err(Interrupt::Io(Io::NeedMoreInput));
         } else {
             // We received enough bytes for the literal.
             // Now we can continue reading the next line.
