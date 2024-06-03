@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use bstr::ByteSlice;
-use imap_flow::{
+use imap_next::{
     client::{
         ClientFlow, ClientFlowCommandHandle, ClientFlowError, ClientFlowEvent, ClientFlowOptions,
     },

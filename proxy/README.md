@@ -11,7 +11,7 @@ Still, ...
 
 ## Features
 
-Thanks to `imap-flow`, the proxy ...
+Thanks to `imap-next`, the proxy ...
 
 * takes advantage of asynchronous I/O,
 * abstracts away literal handling, and
@@ -123,7 +123,7 @@ Note: `openssl s_client` should only really be used for testing.
 
 # Supported authentication mechanisms
 
-The proxy forwards authentication messages unchanged, and uses an [allow-list](https://github.com/duesee/imap-flow/blob/0ccd9384d36ae5aecb15417aeedf772543d9a661/proxy/src/util.rs#L120C4-L120C31)
+The proxy forwards authentication messages unchanged, and uses an [allow-list](https://github.com/duesee/imap-next/blob/0ccd9384d36ae5aecb15417aeedf772543d9a661/proxy/src/util.rs#L120C4-L120C31)
 of capabilities and authentication mechanisms to exclude everything it doesn't understand.
 
 Some authentication mechanisms "bind" to the TLS connection ("channel binding") and will fail when proxied.
@@ -140,7 +140,7 @@ These are not proxyable by design -- at least without further ado -- and are fil
 
 # Current purpose
 
-Proxies are a great way to challenge the usability of a network library such as `imap-flow`.
+Proxies are a great way to challenge the usability of a network library such as `imap-next`.
 To implement a proxy, it's required to implement both the server- and client-side, and the tasks require designing the library in a way that allows even fine-grained forwarding.
 Further, a usable proxy would significantly extend the exposure of `imap-codec` to real-world network traces.
 It should be possible to permanently stick the proxy between real-world IMAP sessions, e.g., to track day-to-day email sessions (and ask other contributors to conduct the same test.)

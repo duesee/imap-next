@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use imap_flow::{client::ClientFlowOptions, server::ServerFlowOptions};
+use imap_next::{client::ClientFlowOptions, server::ServerFlowOptions};
 use tokio::net::TcpListener;
 use tracing::trace;
 use tracing_subscriber::EnvFilter;
@@ -14,7 +14,7 @@ use crate::{
 };
 
 /// Contains all parameters for creating a test setup for the server or client side
-/// of `imap-flow`.
+/// of `imap-next`.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct TestSetup {

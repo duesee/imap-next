@@ -56,7 +56,7 @@ cargo_deny: install_cargo_deny
 [private]
 cargo_semver: install_cargo_semver_checks
     # TODO(#8)
-    # cargo semver-checks check-release --only-explicit-features -p imap-flow
+    # cargo semver-checks check-release --only-explicit-features -p imap-next
 
 # Test multiple configurations
 test: (test_impl ""           ""               ) \
@@ -77,7 +77,7 @@ audit: cargo_deny
 # Measure test coverage
 coverage: install_rust_llvm_tools_preview install_cargo_grcov
     mkdir -p target/coverage
-    RUSTFLAGS="-Cinstrument-coverage" LLVM_PROFILE_FILE="coverage-%m-%p.profraw" cargo test -p imap-flow -p flow-test --all-features
+    RUSTFLAGS="-Cinstrument-coverage" LLVM_PROFILE_FILE="coverage-%m-%p.profraw" cargo test -p imap-next -p flow-test --all-features
     grcov . \
         --source-dir . \
         --binary-path target/debug \

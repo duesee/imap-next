@@ -3,7 +3,7 @@ use std::{
     net::TcpStream,
 };
 
-use imap_flow::{
+use imap_next::{
     client::{ClientFlow, ClientFlowEvent, ClientFlowOptions},
     FlowInterrupt, FlowIo,
 };

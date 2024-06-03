@@ -1,3 +1,3 @@
 # flow-test
 
-Test harness for writing lightweight unit tests for `imap-flow`.
+Test harness for writing lightweight unit tests for `imap-next`.
