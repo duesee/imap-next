@@ -74,7 +74,7 @@ fn command_with_missing_cr() {
 #[test]
 fn crlf_relaxed() {
     let mut setup = TestSetup::default();
-    setup.server_flow_options.crlf_relaxed = true;
+    setup.server_options.crlf_relaxed = true;
 
     let (rt, mut server, mut client) = setup.setup_server();
 
@@ -104,10 +104,10 @@ fn login_with_literal() {
     for max_literal_size in max_literal_size_tests {
         let mut setup = TestSetup::default();
         setup
-            .server_flow_options
+            .server_options
             .set_literal_accept_text("You shall pass".to_string())
             .unwrap();
-        setup.server_flow_options.max_literal_size = max_literal_size;
+        setup.server_options.max_literal_size = max_literal_size;
 
         let (rt, mut server, mut client) = setup.setup_server();
 
@@ -140,10 +140,10 @@ fn login_with_rejected_literal() {
     for max_literal_size in max_literal_size_tests {
         let mut setup = TestSetup::default();
         setup
-            .server_flow_options
+            .server_options
             .set_literal_reject_text("You shall not pass".to_owned())
             .unwrap();
-        setup.server_flow_options.max_literal_size = max_literal_size;
+        setup.server_options.max_literal_size = max_literal_size;
 
         let (rt, mut server, mut client) = setup.setup_server();
 
@@ -168,7 +168,7 @@ fn command_larger_than_max_command_size() {
 
     for max_command_size in max_command_size_tests {
         let mut setup = TestSetup::default();
-        setup.server_flow_options.max_command_size = max_command_size as u32;
+        setup.server_options.max_command_size = max_command_size as u32;
         // Sending large messages takes some time, especially when running on a slow CI.
         setup.runtime_options.timeout = Some(Duration::from_secs(10));
 
@@ -205,12 +205,12 @@ fn command_with_literals_larger_than_max_command_size() {
 
         let mut setup = TestSetup::default();
         setup
-            .server_flow_options
+            .server_options
             .set_literal_accept_text("more data".to_owned())
             .unwrap();
         // Max literal size must be smaller than max command size
-        setup.server_flow_options.max_literal_size = password_size as u32;
-        setup.server_flow_options.max_command_size = max_command_size as u32;
+        setup.server_options.max_literal_size = password_size as u32;
+        setup.server_options.max_command_size = max_command_size as u32;
 
         let (rt, mut server, mut client) = setup.setup_server();
 

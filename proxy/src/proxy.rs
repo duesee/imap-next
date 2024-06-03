@@ -2,9 +2,9 @@ use std::{net::SocketAddr, sync::Arc};
 
 use colored::Colorize;
 use imap_next::{
-    client::{ClientFlow, ClientFlowError, ClientFlowEvent, ClientFlowOptions},
-    server::{ServerFlow, ServerFlowError, ServerFlowEvent, ServerFlowOptions},
-    stream::{Stream, StreamError},
+    client::{self, Client},
+    server::{self, Server},
+    stream::{self, Stream},
 };
 use imap_types::{
     bounded_static::ToBoundedStatic,
@@ -185,17 +185,14 @@ impl State for ConnectedState {}
 
 impl Proxy<ConnectedState> {
     pub async fn start_conversation(self) {
-        let mut proxy_to_server_flow = {
+        let mut proxy_to_server = {
             // TODO(#144): Read options from config
-            let options = ClientFlowOptions::default();
-            ClientFlow::new(options)
+            let options = client::Options::default();
+            Client::new(options)
         };
         let mut proxy_to_server_stream = self.state.proxy_to_server;
-        let mut greeting = match proxy_to_server_stream
-            .progress(&mut proxy_to_server_flow)
-            .await
-        {
-            Ok(ClientFlowEvent::GreetingReceived { greeting }) => greeting,
+        let mut greeting = match proxy_to_server_stream.next(&mut proxy_to_server).await {
+            Ok(client::Event::GreetingReceived { greeting }) => greeting,
             Ok(event) => {
                 error!(role = "s2p", ?event, "Unexpected event");
                 return;
@@ -209,26 +206,26 @@ impl Proxy<ConnectedState> {
 
         util::filter_capabilities_in_greeting(&mut greeting);
 
-        let mut client_to_proxy_flow = {
+        let mut client_to_proxy = {
             // TODO(#144): Read options from config
-            let mut options = ServerFlowOptions::default();
+            let mut options = server::Options::default();
             options
                 .set_literal_accept_text(LITERAL_ACCEPT_TEXT.to_string())
                 .unwrap();
             options
                 .set_literal_reject_text(LITERAL_REJECT_TEXT.to_string())
                 .unwrap();
-            ServerFlow::new(options, greeting)
+            Server::new(options, greeting)
         };
         let mut client_to_proxy_stream = self.state.client_to_proxy;
 
         loop {
             let control_flow = tokio::select! {
-                event = client_to_proxy_stream.progress(&mut client_to_proxy_flow) => {
-                    handle_client_event(event, &mut proxy_to_server_flow)
+                event = client_to_proxy_stream.next(&mut client_to_proxy) => {
+                    handle_client_event(event, &mut proxy_to_server)
                 }
-                event = proxy_to_server_stream.progress(&mut proxy_to_server_flow) => {
-                    handle_server_event(event, &mut client_to_proxy_flow)
+                event = proxy_to_server_stream.next(&mut proxy_to_server) => {
+                    handle_server_event(event, &mut client_to_proxy)
                 }
             };
 
@@ -240,34 +237,34 @@ impl Proxy<ConnectedState> {
 }
 
 fn handle_client_event(
-    result: Result<ServerFlowEvent, StreamError<ServerFlowError>>,
-    proxy_to_server: &mut ClientFlow,
+    result: Result<server::Event, stream::Error<server::Error>>,
+    proxy_to_server: &mut Client,
 ) -> ControlFlow {
     let event = match result {
         Ok(event) => event,
-        Err(StreamError::Closed) => {
+        Err(stream::Error::Closed) => {
             info!(role = "c2p", "Connection closed");
             return ControlFlow::Abort;
         }
-        Err(StreamError::Io(error)) => {
+        Err(stream::Error::Io(error)) => {
             error!(role = "c2p", %error, "Connection terminated");
             return ControlFlow::Abort;
         }
-        Err(StreamError::Tls(error)) => {
+        Err(stream::Error::Tls(error)) => {
             error!(role = "c2p", %error, "Connection terminated");
             return ControlFlow::Abort;
         }
-        Err(StreamError::Flow(
-            ref error @ (ServerFlowError::ExpectedCrlfGotLf {
+        Err(stream::Error::State(
+            ref error @ (server::Error::ExpectedCrlfGotLf {
                 ref discarded_bytes,
             }
-            | ServerFlowError::MalformedMessage {
+            | server::Error::MalformedMessage {
                 ref discarded_bytes,
             }
-            | ServerFlowError::LiteralTooLong {
+            | server::Error::LiteralTooLong {
                 ref discarded_bytes,
             }
-            | ServerFlowError::CommandTooLong {
+            | server::Error::CommandTooLong {
                 ref discarded_bytes,
             }),
         )) => {
@@ -277,19 +274,19 @@ fn handle_client_event(
     };
 
     match event {
-        ServerFlowEvent::GreetingSent { .. } => {
+        server::Event::GreetingSent { .. } => {
             trace!(role = "p2c", "<--- greeting");
         }
-        ServerFlowEvent::ResponseSent { handle, .. } => {
+        server::Event::ResponseSent { handle, .. } => {
             trace!(role = "p2c", ?handle, "<---");
         }
-        ServerFlowEvent::CommandReceived { command } => {
+        server::Event::CommandReceived { command } => {
             trace!(role = "c2p", command=%format!("{:?}", command).red(), "|-->");
 
             let handle = proxy_to_server.enqueue_command(command);
             trace!(role = "p2s", ?handle, "enqueue_command");
         }
-        ServerFlowEvent::CommandAuthenticateReceived {
+        server::Event::CommandAuthenticateReceived {
             command_authenticate,
         } => {
             let command_authenticate: Command<'static> = command_authenticate.into();
@@ -299,7 +296,7 @@ fn handle_client_event(
             let handle = proxy_to_server.enqueue_command(command_authenticate);
             trace!(role = "p2s", ?handle, "enqueue_command");
         }
-        ServerFlowEvent::AuthenticateDataReceived { authenticate_data } => {
+        server::Event::AuthenticateDataReceived { authenticate_data } => {
             trace!(role = "c2p", authenticate_data=%format!("{:?}", authenticate_data).red(), "|-->");
 
             // TODO(#145): Fix unwrap
@@ -308,7 +305,7 @@ fn handle_client_event(
                 .unwrap();
             trace!(role = "p2s", ?handle, "set_authenticate_data");
         }
-        ServerFlowEvent::IdleCommandReceived { tag } => {
+        server::Event::IdleCommandReceived { tag } => {
             let idle = Command {
                 tag,
                 body: CommandBody::Idle,
@@ -319,7 +316,7 @@ fn handle_client_event(
             let handle = proxy_to_server.enqueue_command(idle);
             trace!(role = "p2s", ?handle, "enqueue_command");
         }
-        ServerFlowEvent::IdleDoneReceived => {
+        server::Event::IdleDoneReceived => {
             trace!(role = "c2p", done=%format!("{:?}", IdleDone).red(), "|-->");
 
             let handle = proxy_to_server.set_idle_done();
@@ -331,28 +328,28 @@ fn handle_client_event(
 }
 
 fn handle_server_event(
-    event: Result<ClientFlowEvent, StreamError<ClientFlowError>>,
-    client_to_proxy: &mut ServerFlow,
+    event: Result<client::Event, stream::Error<client::Error>>,
+    client_to_proxy: &mut Server,
 ) -> ControlFlow {
     let event = match event {
         Ok(event) => event,
-        Err(StreamError::Closed) => {
+        Err(stream::Error::Closed) => {
             error!(role = "s2p", "Connection closed");
             return ControlFlow::Abort;
         }
-        Err(StreamError::Io(error)) => {
+        Err(stream::Error::Io(error)) => {
             error!(role = "s2p", %error, "Connection terminated");
             return ControlFlow::Abort;
         }
-        Err(StreamError::Tls(error)) => {
+        Err(stream::Error::Tls(error)) => {
             error!(role = "s2p", %error, "Connection terminated");
             return ControlFlow::Abort;
         }
-        Err(StreamError::Flow(
-            ref error @ (ClientFlowError::ExpectedCrlfGotLf {
+        Err(stream::Error::State(
+            ref error @ (client::Error::ExpectedCrlfGotLf {
                 ref discarded_bytes,
             }
-            | ClientFlowError::MalformedMessage {
+            | client::Error::MalformedMessage {
                 ref discarded_bytes,
             }),
         )) => {
@@ -362,15 +359,15 @@ fn handle_server_event(
     };
 
     match event {
-        ClientFlowEvent::GreetingReceived { greeting } => {
+        client::Event::GreetingReceived { greeting } => {
             // This event is emitted only at the beginning so we must have already
             // handled it somewhere else.
             error!(role = "s2p", ?greeting, "Unexpected greeting");
         }
-        ClientFlowEvent::CommandSent { handle, .. } => {
+        client::Event::CommandSent { handle, .. } => {
             trace!(role = "p2s", ?handle, "--->");
         }
-        ClientFlowEvent::CommandRejected {
+        client::Event::CommandRejected {
             handle,
             command,
             status,
@@ -395,10 +392,10 @@ fn handle_server_event(
             let handle = client_to_proxy.enqueue_status(modified_status.clone());
             trace!(role = "p2c", ?handle, modified_status=%format!("{:?}", modified_status).yellow(), "enqueue_status");
         }
-        ClientFlowEvent::AuthenticateStarted { handle } => {
+        client::Event::AuthenticateStarted { handle } => {
             trace!(role = "p2s", ?handle, "--->");
         }
-        ClientFlowEvent::AuthenticateContinuationRequestReceived {
+        client::Event::AuthenticateContinuationRequestReceived {
             continuation_request,
             ..
         } => {
@@ -409,14 +406,14 @@ fn handle_server_event(
                 .unwrap();
             trace!(role = "p2c", ?handle, "authenticate_continue");
         }
-        ClientFlowEvent::AuthenticateStatusReceived { status, .. } => {
+        client::Event::AuthenticateStatusReceived { status, .. } => {
             trace!(role = "s2p", authenticate_status=%format!("{:?}", status).blue(), "<--|");
 
             // TODO(#145): Fix unwrap
             let handle = client_to_proxy.authenticate_finish(status).unwrap();
             trace!(role = "p2c", ?handle, "authenticate_finish");
         }
-        ClientFlowEvent::DataReceived { mut data } => {
+        client::Event::DataReceived { mut data } => {
             trace!(role = "s2p", data=%format!("{:?}", data).blue(), "<--|");
 
             util::filter_capabilities_in_data(&mut data);
@@ -424,7 +421,7 @@ fn handle_server_event(
             let handle = client_to_proxy.enqueue_data(data);
             trace!(role = "p2c", ?handle, "enqueue_data");
         }
-        ClientFlowEvent::StatusReceived { mut status } => {
+        client::Event::StatusReceived { mut status } => {
             trace!(role = "s2p", status=%format!("{:?}", status).blue(), "<--|");
 
             util::filter_capabilities_in_status(&mut status);
@@ -432,7 +429,7 @@ fn handle_server_event(
             let handle = client_to_proxy.enqueue_status(status);
             trace!(role = "p2c", ?handle, "enqueue_status");
         }
-        ClientFlowEvent::ContinuationRequestReceived {
+        client::Event::ContinuationRequestReceived {
             mut continuation_request,
         } => {
             trace!(role = "s2p", continuation_request=%format!("{:?}", continuation_request).blue(), "<--|");
@@ -442,10 +439,10 @@ fn handle_server_event(
             let handle = client_to_proxy.enqueue_continuation_request(continuation_request);
             trace!(role = "p2c", ?handle, "enqueue_continuation_request");
         }
-        ClientFlowEvent::IdleCommandSent { handle } => {
+        client::Event::IdleCommandSent { handle } => {
             trace!(role = "p2s", ?handle, "--->");
         }
-        ClientFlowEvent::IdleAccepted {
+        client::Event::IdleAccepted {
             handle,
             continuation_request,
         } => {
@@ -460,14 +457,14 @@ fn handle_server_event(
             let handle = client_to_proxy.idle_accept(continuation_request).unwrap();
             trace!(role = "p2c", ?handle, "idle_accept");
         }
-        ClientFlowEvent::IdleRejected { handle, status } => {
+        client::Event::IdleRejected { handle, status } => {
             trace!(role = "s2p", ?handle, idle_rejected_status=%format!("{:?}", status).blue(), "<--|");
 
             // TODO(#145): Fix unwrap
             let handle = client_to_proxy.idle_reject(status).unwrap();
             trace!(role = "p2c", ?handle, "idle_reject");
         }
-        ClientFlowEvent::IdleDoneSent { handle } => {
+        client::Event::IdleDoneSent { handle } => {
             trace!(role = "p2c", ?handle, "--->");
         }
     }

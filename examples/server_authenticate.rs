@@ -1,5 +1,5 @@
 use imap_next::{
-    server::{ServerFlow, ServerFlowEvent, ServerFlowOptions},
+    server::{Event, Options, Server},
     stream::Stream,
     types::CommandAuthenticate,
 };
@@ -11,14 +11,14 @@ async fn main() {
     let listener = TcpListener::bind("127.0.0.1:12345").await.unwrap();
     let (stream, _) = listener.accept().await.unwrap();
     let mut stream = Stream::insecure(stream);
-    let mut server = ServerFlow::new(
-        ServerFlowOptions::default(),
+    let mut server = Server::new(
+        Options::default(),
         Greeting::ok(None, "server_idle (example)").unwrap(),
     );
 
     loop {
-        match stream.progress(&mut server).await.unwrap() {
-            ServerFlowEvent::GreetingSent { .. } => break,
+        match stream.next(&mut server).await.unwrap() {
+            Event::GreetingSent { .. } => break,
             event => println!("unexpected event: {event:?}"),
         }
     }
@@ -26,14 +26,14 @@ async fn main() {
     let mut current_authenticate_tag = None;
 
     loop {
-        let event = stream.progress(&mut server).await.unwrap();
+        let event = stream.next(&mut server).await.unwrap();
         println!("{event:?}");
 
         // We don't implement any real SASL mechanism in this example.
         let pretend_to_need_more_data = rand::random();
 
         match event {
-            ServerFlowEvent::CommandAuthenticateReceived {
+            Event::CommandAuthenticateReceived {
                 command_authenticate: CommandAuthenticate { tag, .. },
             } => {
                 if pretend_to_need_more_data {
@@ -52,7 +52,7 @@ async fn main() {
                         .unwrap();
                 }
             }
-            ServerFlowEvent::AuthenticateDataReceived { .. } => {
+            Event::AuthenticateDataReceived { .. } => {
                 if pretend_to_need_more_data {
                     server
                         .authenticate_continue(
@@ -67,7 +67,7 @@ async fn main() {
                         .unwrap();
                 }
             }
-            ServerFlowEvent::CommandReceived { command } => {
+            Event::CommandReceived { command } => {
                 server.enqueue_status(
                     Status::no(Some(command.tag), None, "Please use AUTHENTICATE").unwrap(),
                 );

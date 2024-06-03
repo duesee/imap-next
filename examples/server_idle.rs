@@ -1,7 +1,7 @@
 use std::{io::BufRead, num::NonZeroU32};
 
 use imap_next::{
-    server::{ServerFlow, ServerFlowEvent, ServerFlowOptions},
+    server::{Event, Options, Server},
     stream::Stream,
 };
 use imap_types::{
@@ -17,14 +17,14 @@ async fn main() {
     let listener = TcpListener::bind("127.0.0.1:12345").await.unwrap();
     let (stream, _) = listener.accept().await.unwrap();
     let mut stream = Stream::insecure(stream);
-    let mut server = ServerFlow::new(
-        ServerFlowOptions::default(),
+    let mut server = Server::new(
+        Options::default(),
         Greeting::ok(None, "server_idle (example)").unwrap(),
     );
 
     loop {
-        match stream.progress(&mut server).await.unwrap() {
-            ServerFlowEvent::GreetingSent { .. } => break,
+        match stream.next(&mut server).await.unwrap() {
+            Event::GreetingSent { .. } => break,
             event => println!("unexpected event: {event:?}"),
         }
     }
@@ -36,14 +36,14 @@ async fn main() {
 
     loop {
         tokio::select! {
-            event = stream.progress(&mut server) => {
+            event = stream.next(&mut server) => {
                 match event.unwrap() {
-                    ServerFlowEvent::IdleCommandReceived { tag } => {
+                    Event::IdleCommandReceived { tag } => {
                         println!("IDLE received");
 
                         current_idle_tag = Some(tag);
                     },
-                    ServerFlowEvent::IdleDoneReceived => {
+                    Event::IdleDoneReceived => {
                         println!("IDLE DONE received");
 
                         if let Some(tag) = current_idle_tag.take() {
@@ -63,7 +63,7 @@ async fn main() {
                     }
                 }
             }
-            line = lines.progress() => {
+            line = lines.next() => {
                 match line.as_ref() {
                     "ok" => {
                         let cont = CommandContinuationRequest::basic(None, "...").unwrap();
@@ -120,7 +120,7 @@ impl Lines {
         Self { receiver }
     }
 
-    pub async fn progress(&mut self) -> String {
+    pub async fn next(&mut self) -> String {
         self.receiver.recv().await.unwrap()
     }
 }

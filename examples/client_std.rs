@@ -4,8 +4,8 @@ use std::{
 };
 
 use imap_next::{
-    client::{ClientFlow, ClientFlowEvent, ClientFlowOptions},
-    FlowInterrupt, FlowIo,
+    client::{Client, Event, Options},
+    Interrupt, Io, State,
 };
 use imap_types::{
     command::{Command, CommandBody},
@@ -15,19 +15,19 @@ use imap_types::{
 fn main() {
     let mut stream = TcpStream::connect("127.0.0.1:12345").unwrap();
     let mut read_buffer = [0; 128];
-    let mut client = ClientFlow::new(ClientFlowOptions::default());
+    let mut client = Client::new(Options::default());
 
     let greeting = loop {
-        match client.progress() {
+        match client.next() {
             Err(interrupt) => match interrupt {
-                FlowInterrupt::Io(FlowIo::NeedMoreInput) => {
+                Interrupt::Io(Io::NeedMoreInput) => {
                     let count = stream.read(&mut read_buffer).unwrap();
                     client.enqueue_input(&read_buffer[0..count]);
                 }
                 interrupt => panic!("unexpected interrupt: {interrupt:?}"),
             },
             Ok(event) => match event {
-                ClientFlowEvent::GreetingReceived { greeting } => break greeting,
+                Event::GreetingReceived { greeting } => break greeting,
                 event => println!("unexpected event: {event:?}"),
             },
         }
@@ -41,28 +41,28 @@ fn main() {
     });
 
     loop {
-        match client.progress() {
+        match client.next() {
             Err(interrupt) => match interrupt {
-                FlowInterrupt::Io(FlowIo::NeedMoreInput) => {
+                Interrupt::Io(Io::NeedMoreInput) => {
                     let count = stream.read(&mut read_buffer).unwrap();
                     client.enqueue_input(&read_buffer[0..count]);
                 }
-                FlowInterrupt::Io(FlowIo::Output(bytes)) => {
+                Interrupt::Io(Io::Output(bytes)) => {
                     stream.write_all(&bytes).unwrap();
                 }
-                FlowInterrupt::Error(error) => {
+                Interrupt::Error(error) => {
                     panic!("unexpected error: {error:?}");
                 }
             },
             Ok(event) => match event {
-                ClientFlowEvent::CommandSent {
+                Event::CommandSent {
                     handle: got_handle,
                     command,
                 } => {
                     println!("command sent: {got_handle:?}, {command:?}");
                     assert_eq!(handle, got_handle);
                 }
-                ClientFlowEvent::CommandRejected {
+                Event::CommandRejected {
                     handle: got_handle,
                     command,
                     status,
@@ -70,13 +70,13 @@ fn main() {
                     println!("command rejected: {got_handle:?}, {command:?}, {status:?}");
                     assert_eq!(handle, got_handle);
                 }
-                ClientFlowEvent::DataReceived { data } => {
+                Event::DataReceived { data } => {
                     println!("data received: {data:?}");
                 }
-                ClientFlowEvent::StatusReceived { status } => {
+                Event::StatusReceived { status } => {
                     println!("status received: {status:?}");
                 }
-                ClientFlowEvent::ContinuationRequestReceived {
+                Event::ContinuationRequestReceived {
                     continuation_request,
                 } => {
                     println!("unexpected continuation request received: {continuation_request:?}");

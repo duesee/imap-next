@@ -1,5 +1,5 @@
 use imap_next::{
-    client::{ClientFlow, ClientFlowEvent, ClientFlowOptions},
+    client::{Client, Event, Options},
     stream::Stream,
 };
 use imap_types::{
@@ -12,11 +12,11 @@ use tokio::net::TcpStream;
 async fn main() {
     let stream = TcpStream::connect("127.0.0.1:12345").await.unwrap();
     let mut stream = Stream::insecure(stream);
-    let mut client = ClientFlow::new(ClientFlowOptions::default());
+    let mut client = Client::new(Options::default());
 
     let greeting = loop {
-        match stream.progress(&mut client).await.unwrap() {
-            ClientFlowEvent::GreetingReceived { greeting } => break greeting,
+        match stream.next(&mut client).await.unwrap() {
+            Event::GreetingReceived { greeting } => break greeting,
             event => println!("unexpected event: {event:?}"),
         }
     };
@@ -29,15 +29,15 @@ async fn main() {
     });
 
     loop {
-        match stream.progress(&mut client).await.unwrap() {
-            ClientFlowEvent::CommandSent {
+        match stream.next(&mut client).await.unwrap() {
+            Event::CommandSent {
                 handle: got_handle,
                 command,
             } => {
                 println!("command sent: {got_handle:?}, {command:?}");
                 assert_eq!(handle, got_handle);
             }
-            ClientFlowEvent::CommandRejected {
+            Event::CommandRejected {
                 handle: got_handle,
                 command,
                 status,
@@ -45,13 +45,13 @@ async fn main() {
                 println!("command rejected: {got_handle:?}, {command:?}, {status:?}");
                 assert_eq!(handle, got_handle);
             }
-            ClientFlowEvent::DataReceived { data } => {
+            Event::DataReceived { data } => {
                 println!("data received: {data:?}");
             }
-            ClientFlowEvent::StatusReceived { status } => {
+            Event::StatusReceived { status } => {
                 println!("status received: {status:?}");
             }
-            ClientFlowEvent::ContinuationRequestReceived {
+            Event::ContinuationRequestReceived {
                 continuation_request,
             } => {
                 println!("unexpected continuation request received: {continuation_request:?}");

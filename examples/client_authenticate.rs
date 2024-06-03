@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use imap_next::{
-    client::{ClientFlow, ClientFlowEvent, ClientFlowOptions},
+    client::{Client, Event, Options},
     stream::Stream,
 };
 use imap_types::{
@@ -15,11 +15,11 @@ use tokio::net::TcpStream;
 async fn main() {
     let stream = TcpStream::connect("127.0.0.1:12345").await.unwrap();
     let mut stream = Stream::insecure(stream);
-    let mut client = ClientFlow::new(ClientFlowOptions::default());
+    let mut client = Client::new(Options::default());
 
     loop {
-        match stream.progress(&mut client).await.unwrap() {
-            ClientFlowEvent::GreetingReceived { .. } => break,
+        match stream.next(&mut client).await.unwrap() {
+            Event::GreetingReceived { .. } => break,
             event => println!("unexpected event: {event:?}"),
         }
     }
@@ -38,11 +38,11 @@ async fn main() {
     ]);
 
     loop {
-        let event = stream.progress(&mut client).await.unwrap();
+        let event = stream.next(&mut client).await.unwrap();
         println!("{event:?}");
 
         match event {
-            ClientFlowEvent::AuthenticateContinuationRequestReceived { .. } => {
+            Event::AuthenticateContinuationRequestReceived { .. } => {
                 if let Some(authenticate_data) = authenticate_data.pop_front() {
                     client.set_authenticate_data(authenticate_data).unwrap();
                 } else {
@@ -51,7 +51,7 @@ async fn main() {
                         .unwrap();
                 }
             }
-            ClientFlowEvent::AuthenticateStatusReceived { .. } => {
+            Event::AuthenticateStatusReceived { .. } => {
                 break;
             }
             _ => {}

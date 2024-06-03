@@ -18,20 +18,20 @@ use crate::{
     handle::{Handle, HandleGenerator, HandleGeneratorGenerator, RawHandle},
     receive::{ReceiveError, ReceiveEvent, ReceiveState},
     types::CommandAuthenticate,
-    Flow, FlowInterrupt,
+    Interrupt, State,
 };
 
-static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<ClientFlowCommandHandle> =
+static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<CommandHandle> =
     HandleGeneratorGenerator::new();
 
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
-pub struct ClientFlowOptions {
+pub struct Options {
     pub crlf_relaxed: bool,
 }
 
 #[allow(clippy::derivable_impls)]
-impl Default for ClientFlowOptions {
+impl Default for Options {
     fn default() -> Self {
         Self {
             // Lean towards conformity
@@ -40,14 +40,14 @@ impl Default for ClientFlowOptions {
     }
 }
 
-pub struct ClientFlow {
-    handle_generator: HandleGenerator<ClientFlowCommandHandle>,
+pub struct Client {
+    handle_generator: HandleGenerator<CommandHandle>,
     send_state: ClientSendState,
     receive_state: ClientReceiveState,
 }
 
-impl ClientFlow {
-    pub fn new(options: ClientFlowOptions) -> Self {
+impl Client {
+    pub fn new(options: Options) -> Self {
         let send_state = ClientSendState::new(
             CommandCodec::default(),
             AuthenticateDataCodec::default(),
@@ -67,124 +67,102 @@ impl ClientFlow {
         }
     }
 
-    pub fn enqueue_input(&mut self, bytes: &[u8]) {
-        match &mut self.receive_state {
-            ClientReceiveState::Greeting(state) => state.enqueue_input(bytes),
-            ClientReceiveState::Response(state) => state.enqueue_input(bytes),
-            ClientReceiveState::Dummy => unreachable!(),
-        }
-    }
-
     /// Enqueues the [`Command`] for being sent to the client.
     ///
     /// The [`Command`] is not sent immediately but during one of the next calls of
-    /// [`ClientFlow::progress`]. All [`Command`]s are sent in the same order they have been
+    /// [`Client::next`]. All [`Command`]s are sent in the same order they have been
     /// enqueued.
-    pub fn enqueue_command(&mut self, command: Command<'static>) -> ClientFlowCommandHandle {
+    pub fn enqueue_command(&mut self, command: Command<'static>) -> CommandHandle {
         let handle = self.handle_generator.generate();
         self.send_state.enqueue_command(handle, command);
         handle
     }
 
-    pub fn progress(&mut self) -> Result<ClientFlowEvent, FlowInterrupt<ClientFlowError>> {
-        loop {
-            if let Some(event) = self.progress_send()? {
-                return Ok(event);
-            }
-
-            if let Some(event) = self.progress_receive()? {
-                return Ok(event);
-            }
-        }
-    }
-
-    fn progress_send(&mut self) -> Result<Option<ClientFlowEvent>, FlowInterrupt<ClientFlowError>> {
+    fn progress_send(&mut self) -> Result<Option<Event>, Interrupt<Error>> {
         // Abort if we didn't received the greeting yet
         if let ClientReceiveState::Greeting(_) = &self.receive_state {
             return Ok(None);
         }
 
-        match self.send_state.progress() {
+        match self.send_state.next() {
             Ok(Some(ClientSendEvent::Command { handle, command })) => {
-                Ok(Some(ClientFlowEvent::CommandSent { handle, command }))
+                Ok(Some(Event::CommandSent { handle, command }))
             }
             Ok(Some(ClientSendEvent::Authenticate { handle })) => {
-                Ok(Some(ClientFlowEvent::AuthenticateStarted { handle }))
+                Ok(Some(Event::AuthenticateStarted { handle }))
             }
             Ok(Some(ClientSendEvent::Idle { handle })) => {
-                Ok(Some(ClientFlowEvent::IdleCommandSent { handle }))
+                Ok(Some(Event::IdleCommandSent { handle }))
             }
             Ok(Some(ClientSendEvent::IdleDone { handle })) => {
-                Ok(Some(ClientFlowEvent::IdleDoneSent { handle }))
+                Ok(Some(Event::IdleDoneSent { handle }))
             }
             Ok(None) => Ok(None),
-            Err(FlowInterrupt::Io(io)) => Err(FlowInterrupt::Io(io)),
-            Err(FlowInterrupt::Error(_)) => unreachable!(),
+            Err(Interrupt::Io(io)) => Err(Interrupt::Io(io)),
+            Err(Interrupt::Error(_)) => unreachable!(),
         }
     }
 
-    fn progress_receive(
-        &mut self,
-    ) -> Result<Option<ClientFlowEvent>, FlowInterrupt<ClientFlowError>> {
+    fn progress_receive(&mut self) -> Result<Option<Event>, Interrupt<Error>> {
         let event = loop {
             match &mut self.receive_state {
                 ClientReceiveState::Greeting(state) => {
-                    match state.progress() {
+                    match state.next() {
                         Ok(ReceiveEvent::DecodingSuccess(greeting)) => {
                             state.finish_message();
                             self.receive_state.change_state();
-                            break Some(ClientFlowEvent::GreetingReceived { greeting });
+                            break Some(Event::GreetingReceived { greeting });
                         }
-                        Err(FlowInterrupt::Io(io)) => return Err(FlowInterrupt::Io(io)),
-                        Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
+                        Err(Interrupt::Io(io)) => return Err(Interrupt::Io(io)),
+                        Err(Interrupt::Error(ReceiveError::DecodingFailure(
                             GreetingDecodeError::Failed | GreetingDecodeError::Incomplete,
                         ))) => {
                             let discarded_bytes = state.discard_message();
-                            return Err(FlowInterrupt::Error(ClientFlowError::MalformedMessage {
+                            return Err(Interrupt::Error(Error::MalformedMessage {
                                 discarded_bytes: Secret::new(discarded_bytes),
                             }));
                         }
-                        Err(FlowInterrupt::Error(ReceiveError::ExpectedCrlfGotLf)) => {
+                        Err(Interrupt::Error(ReceiveError::ExpectedCrlfGotLf)) => {
                             let discarded_bytes = state.discard_message();
-                            return Err(FlowInterrupt::Error(ClientFlowError::ExpectedCrlfGotLf {
+                            return Err(Interrupt::Error(Error::ExpectedCrlfGotLf {
                                 discarded_bytes: Secret::new(discarded_bytes),
                             }));
                         }
-                        Err(FlowInterrupt::Error(ReceiveError::MessageTooLong)) => {
+                        Err(Interrupt::Error(ReceiveError::MessageTooLong)) => {
                             // Unreachable because message limit is not set
                             unreachable!()
                         }
                     }
                 }
                 ClientReceiveState::Response(state) => {
-                    let response = match state.progress() {
+                    let response = match state.next() {
                         Ok(ReceiveEvent::DecodingSuccess(response)) => {
                             state.finish_message();
                             response
                         }
-                        Err(FlowInterrupt::Io(io)) => return Err(FlowInterrupt::Io(io)),
-                        Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
+                        Err(Interrupt::Io(io)) => return Err(Interrupt::Io(io)),
+                        Err(Interrupt::Error(ReceiveError::DecodingFailure(
                             ResponseDecodeError::LiteralFound { length },
                         ))) => {
                             // The client must accept the literal in any case.
                             state.start_literal(length);
                             continue;
                         }
-                        Err(FlowInterrupt::Error(ReceiveError::DecodingFailure(
+                        Err(Interrupt::Error(ReceiveError::DecodingFailure(
                             ResponseDecodeError::Failed | ResponseDecodeError::Incomplete,
                         ))) => {
                             let discarded_bytes = state.discard_message();
-                            return Err(FlowInterrupt::Error(ClientFlowError::MalformedMessage {
+                            return Err(Interrupt::Error(Error::MalformedMessage {
                                 discarded_bytes: Secret::new(discarded_bytes),
                             }));
                         }
-                        Err(FlowInterrupt::Error(ReceiveError::ExpectedCrlfGotLf)) => {
+                        Err(Interrupt::Error(ReceiveError::ExpectedCrlfGotLf)) => {
                             let discarded_bytes = state.discard_message();
-                            return Err(FlowInterrupt::Error(ClientFlowError::ExpectedCrlfGotLf {
+                            return Err(Interrupt::Error(Error::ExpectedCrlfGotLf {
                                 discarded_bytes: Secret::new(discarded_bytes),
                             }));
                         }
-                        Err(FlowInterrupt::Error(ReceiveError::MessageTooLong)) => {
+                        Err(Interrupt::Error(ReceiveError::MessageTooLong)) => {
                             // Unreachable because message limit is not set
                             unreachable!()
                         }
@@ -197,7 +175,7 @@ impl ClientFlow {
                             {
                                 match finish_result {
                                     ClientSendTermination::LiteralRejected { handle, command } => {
-                                        ClientFlowEvent::CommandRejected {
+                                        Event::CommandRejected {
                                             handle,
                                             command,
                                             status,
@@ -210,22 +188,22 @@ impl ClientFlow {
                                     | ClientSendTermination::AuthenticateRejected {
                                         handle,
                                         command_authenticate,
-                                    } => ClientFlowEvent::AuthenticateStatusReceived {
+                                    } => Event::AuthenticateStatusReceived {
                                         handle,
                                         command_authenticate,
                                         status,
                                     },
                                     ClientSendTermination::IdleRejected { handle } => {
-                                        ClientFlowEvent::IdleRejected { handle, status }
+                                        Event::IdleRejected { handle, status }
                                     }
                                 }
                             } else {
-                                ClientFlowEvent::StatusReceived { status }
+                                Event::StatusReceived { status }
                             };
 
                             break Some(event);
                         }
-                        Response::Data(data) => break Some(ClientFlowEvent::DataReceived { data }),
+                        Response::Data(data) => break Some(Event::DataReceived { data }),
                         Response::CommandContinuationRequest(continuation_request) => {
                             if self.send_state.literal_continue() {
                                 // We received a continuation request that was necessary for
@@ -233,19 +211,17 @@ impl ClientFlow {
                                 // and continue with sending commands.
                                 break None;
                             } else if let Some(handle) = self.send_state.authenticate_continue() {
-                                break Some(
-                                    ClientFlowEvent::AuthenticateContinuationRequestReceived {
-                                        handle,
-                                        continuation_request,
-                                    },
-                                );
+                                break Some(Event::AuthenticateContinuationRequestReceived {
+                                    handle,
+                                    continuation_request,
+                                });
                             } else if let Some(handle) = self.send_state.idle_continue() {
-                                break Some(ClientFlowEvent::IdleAccepted {
+                                break Some(Event::IdleAccepted {
                                     handle,
                                     continuation_request,
                                 });
                             } else {
-                                break Some(ClientFlowEvent::ContinuationRequestReceived {
+                                break Some(Event::ContinuationRequestReceived {
                                     continuation_request,
                                 });
                             }
@@ -264,132 +240,143 @@ impl ClientFlow {
     pub fn set_authenticate_data(
         &mut self,
         authenticate_data: AuthenticateData<'static>,
-    ) -> Result<ClientFlowCommandHandle, AuthenticateData<'static>> {
+    ) -> Result<CommandHandle, AuthenticateData<'static>> {
         self.send_state.set_authenticate_data(authenticate_data)
     }
 
-    pub fn set_idle_done(&mut self) -> Option<ClientFlowCommandHandle> {
+    pub fn set_idle_done(&mut self) -> Option<CommandHandle> {
         self.send_state.set_idle_done()
     }
 }
 
-impl Debug for ClientFlow {
+impl Debug for Client {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        f.debug_struct("ClientFlow")
+        f.debug_struct("Client")
             .field("handle_generator", &self.handle_generator)
             .finish_non_exhaustive()
     }
 }
 
-impl Flow for ClientFlow {
-    type Event = ClientFlowEvent;
-    type Error = ClientFlowError;
+impl State for Client {
+    type Event = Event;
+    type Error = Error;
 
     fn enqueue_input(&mut self, bytes: &[u8]) {
-        self.enqueue_input(bytes)
+        match &mut self.receive_state {
+            ClientReceiveState::Greeting(state) => state.enqueue_input(bytes),
+            ClientReceiveState::Response(state) => state.enqueue_input(bytes),
+            ClientReceiveState::Dummy => unreachable!(),
+        }
     }
 
-    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
-        self.progress()
+    fn next(&mut self) -> Result<Self::Event, Interrupt<Self::Error>> {
+        loop {
+            if let Some(event) = self.progress_send()? {
+                return Ok(event);
+            }
+
+            if let Some(event) = self.progress_receive()? {
+                return Ok(event);
+            }
+        }
     }
 }
 
 /// Handle for enqueued [`Command`].
 ///
 /// This handle can be used to track the sending progress. After a [`Command`] was enqueued via
-/// [`ClientFlow::enqueue_command`] it is in the process of being sent until
-/// [`ClientFlow::progress`] returns a [`ClientFlowEvent::CommandSent`] or
-/// [`ClientFlowEvent::CommandRejected`] with the corresponding handle.
+/// [`Client::enqueue_command`] it is in the process of being sent until [`Client::next`] returns
+/// a [`Event::CommandSent`] or [`Event::CommandRejected`] with the corresponding handle.
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
-pub struct ClientFlowCommandHandle(RawHandle);
+pub struct CommandHandle(RawHandle);
 
 /// Debug representation hiding the raw handle.
-impl Debug for ClientFlowCommandHandle {
+impl Debug for CommandHandle {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ClientFlowCommandHandle")
+        f.debug_tuple("CommandHandle")
             .field(&self.0.generator_id())
             .field(&self.0.handle_id())
             .finish()
     }
 }
 
-impl Handle for ClientFlowCommandHandle {
+impl Handle for CommandHandle {
     fn from_raw(handle: RawHandle) -> Self {
         Self(handle)
     }
 }
 
 #[derive(Debug)]
-pub enum ClientFlowEvent {
+pub enum Event {
     /// [`Greeting`] received.
     GreetingReceived { greeting: Greeting<'static> },
     /// [`Command`] sent completely.
     CommandSent {
         /// Handle to the enqueued [`Command`].
-        handle: ClientFlowCommandHandle,
+        handle: CommandHandle,
         /// Formerly enqueued [`Command`].
         command: Command<'static>,
     },
     /// [`Command`] rejected due to literal.
     CommandRejected {
         /// Handle to enqueued [`Command`].
-        handle: ClientFlowCommandHandle,
+        handle: CommandHandle,
         /// Formerly enqueued [`Command`].
         command: Command<'static>,
         /// [`Status`] sent by the server to reject the [`Command`].
         ///
-        /// Note: [`ClientFlow`] already handled this [`Status`] but it might still have
+        /// Note: [`Client`] already handled this [`Status`] but it might still have
         /// useful information that could be logged or displayed to the user
         /// (e.g. [`Code::Alert`](imap_types::response::Code::Alert)).
         status: Status<'static>,
     },
     /// AUTHENTICATE sent.
-    AuthenticateStarted { handle: ClientFlowCommandHandle },
+    AuthenticateStarted { handle: CommandHandle },
     /// Server requests (more) authentication data.
     ///
-    /// The client MUST call [`ClientFlow::set_authenticate_data`] next.
+    /// The client MUST call [`Client::set_authenticate_data`] next.
     ///
     /// Note: The client can also progress the authentication by sending [`AuthenticateData::Cancel`].
     /// However, it's up to the server to abort the authentication flow by sending a tagged status response.
     AuthenticateContinuationRequestReceived {
         /// Handle to the enqueued [`Command`].
-        handle: ClientFlowCommandHandle,
+        handle: CommandHandle,
         continuation_request: CommandContinuationRequest<'static>,
     },
     /// [`Status`] received to authenticate command.
     AuthenticateStatusReceived {
-        handle: ClientFlowCommandHandle,
+        handle: CommandHandle,
         command_authenticate: CommandAuthenticate,
         status: Status<'static>,
     },
     /// IDLE sent.
-    IdleCommandSent { handle: ClientFlowCommandHandle },
+    IdleCommandSent { handle: CommandHandle },
     /// IDLE accepted by server. Entering IDLE state.
     IdleAccepted {
-        handle: ClientFlowCommandHandle,
+        handle: CommandHandle,
         continuation_request: CommandContinuationRequest<'static>,
     },
     /// IDLE rejected by server.
     IdleRejected {
-        handle: ClientFlowCommandHandle,
+        handle: CommandHandle,
         status: Status<'static>,
     },
     /// DONE sent. Exiting IDLE state.
-    IdleDoneSent { handle: ClientFlowCommandHandle },
+    IdleDoneSent { handle: CommandHandle },
     /// Server [`Data`] received.
     DataReceived { data: Data<'static> },
     /// Server [`Status`] received.
     StatusReceived { status: Status<'static> },
     /// Server [`CommandContinuationRequest`] response received.
     ///
-    /// Note: The received continuation request was not part of [`ClientFlow`] handling.
+    /// Note: The received continuation request was not part of [`Client`] handling.
     ContinuationRequestReceived {
         continuation_request: CommandContinuationRequest<'static>,
     },
 }
 
 #[derive(Debug, Error)]
-pub enum ClientFlowError {
+pub enum Error {
     #[error("Expected `\\r\\n`, got `\\n`")]
     ExpectedCrlfGotLf { discarded_bytes: Secret<Box<[u8]>> },
     #[error("Received malformed message")]

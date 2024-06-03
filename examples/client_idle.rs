@@ -1,7 +1,7 @@
 use std::io::BufRead;
 
 use imap_next::{
-    client::{ClientFlow, ClientFlowEvent, ClientFlowOptions},
+    client::{Client, Event, Options},
     stream::Stream,
 };
 use imap_types::{
@@ -15,11 +15,11 @@ use tokio::{net::TcpStream, sync::mpsc::Receiver};
 async fn main() {
     let stream = TcpStream::connect("127.0.0.1:12345").await.unwrap();
     let mut stream = Stream::insecure(stream);
-    let mut client = ClientFlow::new(ClientFlowOptions::default());
+    let mut client = Client::new(Options::default());
 
     loop {
-        match stream.progress(&mut client).await.unwrap() {
-            ClientFlowEvent::GreetingReceived { .. } => break,
+        match stream.next(&mut client).await.unwrap() {
+            Event::GreetingReceived { .. } => break,
             event => println!("unexpected event: {event:?}"),
         }
     }
@@ -35,26 +35,26 @@ async fn main() {
 
     loop {
         tokio::select! {
-            event = stream.progress(&mut client) => {
+            event = stream.next(&mut client) => {
                 match event.unwrap() {
-                    ClientFlowEvent::IdleCommandSent { .. } => {
+                    Event::IdleCommandSent { .. } => {
                         println!("IDLE command sent")
                     },
-                    ClientFlowEvent::IdleAccepted { continuation_request, .. } => {
+                    Event::IdleAccepted { continuation_request, .. } => {
                         println!("IDLE accepted: {continuation_request:?}");
                     },
-                    ClientFlowEvent::IdleRejected { status, .. } => {
+                    Event::IdleRejected { status, .. } => {
                         println!("IDLE rejected: {status:?}");
                         break;
                     },
-                    ClientFlowEvent::IdleDoneSent { .. } => {
+                    Event::IdleDoneSent { .. } => {
                         println!("IDLE DONE sent");
                         break;
                     },
-                    ClientFlowEvent::DataReceived { data } => {
+                    Event::DataReceived { data } => {
                         println!("Data received: {data:?}")
                     },
-                    ClientFlowEvent::StatusReceived { status } => {
+                    Event::StatusReceived { status } => {
                         println!("Status received: {status:?}")
                     },
                     event => {
@@ -62,7 +62,7 @@ async fn main() {
                     }
                 }
             }
-            _ = lines.progress() => {
+            _ = lines.next() => {
                 if client.set_idle_done().is_some() {
                     println!("Triggered IDLE DONE");
                 } else {
@@ -73,8 +73,8 @@ async fn main() {
     }
 
     loop {
-        match stream.progress(&mut client).await.unwrap() {
-            ref event @ ClientFlowEvent::StatusReceived {
+        match stream.next(&mut client).await.unwrap() {
+            ref event @ Event::StatusReceived {
                 status:
                     Status::Tagged(Tagged {
                         tag: ref got_tag, ..
@@ -106,7 +106,7 @@ impl Lines {
         Self { receiver }
     }
 
-    pub async fn progress(&mut self) -> String {
+    pub async fn next(&mut self) -> String {
         self.receiver.recv().await.unwrap()
     }
 }

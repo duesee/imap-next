@@ -7,8 +7,8 @@ use imap_types::{
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
-    client::{ClientFlow, ClientFlowEvent, ClientFlowOptions},
-    server::{ServerFlow, ServerFlowEvent, ServerFlowOptions},
+    client::{self, Client},
+    server::{self, Server},
     stream::Stream,
 };
 
@@ -26,15 +26,15 @@ async fn self_test() {
         async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut stream = Stream::insecure(stream);
-            let mut server = ServerFlow::new(ServerFlowOptions::default(), greeting.clone());
+            let mut server = Server::new(server::Options::default(), greeting.clone());
 
             loop {
-                match stream.progress(&mut server).await.unwrap() {
-                    ServerFlowEvent::CommandReceived { command } => {
+                match stream.next(&mut server).await.unwrap() {
+                    server::Event::CommandReceived { command } => {
                         let no = Status::no(Some(command.tag), None, "...").unwrap();
                         server.enqueue_status(no);
                     }
-                    ServerFlowEvent::CommandAuthenticateReceived {
+                    server::Event::CommandAuthenticateReceived {
                         command_authenticate,
                     } => {
                         let no = Status::no(Some(command_authenticate.tag), None, "...").unwrap();
@@ -51,18 +51,18 @@ async fn self_test() {
 
     let stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
     let mut stream = Stream::insecure(stream);
-    let mut client = ClientFlow::new(ClientFlowOptions::default());
+    let mut client = Client::new(client::Options::default());
 
     client.enqueue_command(Command::new(Tag::unvalidated("A1"), CommandBody::Capability).unwrap());
 
     loop {
-        match stream.progress(&mut client).await.unwrap() {
-            ClientFlowEvent::GreetingReceived {
+        match stream.next(&mut client).await.unwrap() {
+            client::Event::GreetingReceived {
                 greeting: received_greeting,
             } => {
                 assert_eq!(greeting, received_greeting)
             }
-            ClientFlowEvent::StatusReceived { .. } => {
+            client::Event::StatusReceived { .. } => {
                 client.enqueue_command(
                     Command::new(
                         Tag::unvalidated("A2"),
@@ -74,7 +74,7 @@ async fn self_test() {
                     .unwrap(),
                 );
             }
-            ClientFlowEvent::AuthenticateStatusReceived { .. } => break,
+            client::Event::AuthenticateStatusReceived { .. } => break,
             _ => {}
         }
     }

@@ -6,7 +6,7 @@ use imap_codec::{
 };
 use imap_types::response::{Greeting, Response};
 
-use crate::{server::ServerFlowResponseHandle, FlowInterrupt, FlowIo};
+use crate::{server::ResponseHandle, Interrupt, Io};
 
 pub struct ServerSendState {
     greeting_codec: GreetingCodec,
@@ -34,14 +34,14 @@ impl ServerSendState {
 
     pub fn enqueue_response(
         &mut self,
-        handle: Option<ServerFlowResponseHandle>,
+        handle: Option<ResponseHandle>,
         response: Response<'static>,
     ) {
         self.queued_messages
             .push_back(QueuedMessage::Response { handle, response });
     }
 
-    pub fn progress(&mut self) -> Result<Option<ServerSendEvent>, FlowInterrupt<Infallible>> {
+    pub fn next(&mut self) -> Result<Option<ServerSendEvent>, Interrupt<Infallible>> {
         match self.current_message.take() {
             Some(current_message) => {
                 // Continue the message that was interrupted.
@@ -71,8 +71,8 @@ impl ServerSendState {
 
                 self.current_message = Some(current_message);
 
-                // Interrupt the flow for sendng all bytes of current message
-                Err(FlowInterrupt::Io(FlowIo::Output(write_buffer)))
+                // Interrupt the state for sending all bytes of current message
+                Err(Interrupt::Io(Io::Output(write_buffer)))
             }
         }
     }
@@ -84,7 +84,7 @@ enum QueuedMessage {
         greeting: Greeting<'static>,
     },
     Response {
-        handle: Option<ServerFlowResponseHandle>,
+        handle: Option<ResponseHandle>,
         response: Response<'static>,
     },
 }
@@ -131,7 +131,7 @@ enum CurrentMessage {
         greeting: Greeting<'static>,
     },
     Response {
-        handle: Option<ServerFlowResponseHandle>,
+        handle: Option<ResponseHandle>,
         response: Response<'static>,
     },
 }
@@ -142,7 +142,7 @@ pub enum ServerSendEvent {
         greeting: Greeting<'static>,
     },
     Response {
-        handle: Option<ServerFlowResponseHandle>,
+        handle: Option<ResponseHandle>,
         response: Response<'static>,
     },
 }

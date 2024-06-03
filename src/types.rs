@@ -1,6 +1,5 @@
 //! Types that extend `imap-types`.
-//!
-//! TODO: Do we really need this?
+// TODO: Do we really need this?
 
 use std::borrow::Cow;
 

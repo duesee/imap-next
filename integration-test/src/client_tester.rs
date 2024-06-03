@@ -2,10 +2,8 @@ use std::net::SocketAddr;
 
 use bstr::ByteSlice;
 use imap_next::{
-    client::{
-        ClientFlow, ClientFlowCommandHandle, ClientFlowError, ClientFlowEvent, ClientFlowOptions,
-    },
-    stream::{Stream, StreamError},
+    client::{self, Client, CommandHandle},
+    stream::{self, Stream},
 };
 use imap_types::{bounded_static::ToBoundedStatic, command::Command};
 use tokio::net::TcpStream;
@@ -22,13 +20,13 @@ pub struct ClientTester {
 impl ClientTester {
     pub async fn new(
         codecs: Codecs,
-        client_flow_options: ClientFlowOptions,
+        client_options: client::Options,
         server_address: SocketAddr,
     ) -> Self {
         let stream = TcpStream::connect(server_address).await.unwrap();
         trace!(?server_address, "Client is connected");
         let stream = Stream::insecure(stream);
-        let client = ClientFlow::new(client_flow_options);
+        let client = Client::new(client_options);
         Self {
             codecs,
             connection_state: ConnectionState::Connected { stream, client },
@@ -38,9 +36,9 @@ impl ClientTester {
     pub async fn receive_greeting(&mut self, expected_bytes: &[u8]) {
         let expected_greeting = self.codecs.decode_greeting(expected_bytes);
         let (stream, client) = self.connection_state.connected();
-        let event = stream.progress(client).await.unwrap();
+        let event = stream.next(client).await.unwrap();
         match event {
-            ClientFlowEvent::GreetingReceived { greeting } => {
+            client::Event::GreetingReceived { greeting } => {
                 assert_eq!(expected_greeting, greeting);
             }
             event => {
@@ -58,9 +56,9 @@ impl ClientTester {
 
     pub async fn progress_command(&mut self, enqueued_command: EnqueuedCommand) {
         let (stream, client) = self.connection_state.connected();
-        let event = stream.progress(client).await.unwrap();
+        let event = stream.next(client).await.unwrap();
         match event {
-            ClientFlowEvent::CommandSent { handle, command } => {
+            client::Event::CommandSent { handle, command } => {
                 assert_eq!(enqueued_command.handle, handle);
                 assert_eq!(enqueued_command.command, command);
             }
@@ -77,9 +75,9 @@ impl ClientTester {
     ) {
         let expected_status = self.codecs.decode_status(status_bytes);
         let (stream, client) = self.connection_state.connected();
-        let event = stream.progress(client).await.unwrap();
+        let event = stream.next(client).await.unwrap();
         match event {
-            ClientFlowEvent::CommandRejected {
+            client::Event::CommandRejected {
                 handle,
                 command,
                 status,
@@ -108,9 +106,9 @@ impl ClientTester {
     pub async fn receive_data(&mut self, expected_bytes: &[u8]) {
         let expected_data = self.codecs.decode_data(expected_bytes);
         let (stream, client) = self.connection_state.connected();
-        let event = stream.progress(client).await.unwrap();
+        let event = stream.next(client).await.unwrap();
         match event {
-            ClientFlowEvent::DataReceived { data } => {
+            client::Event::DataReceived { data } => {
                 assert_eq!(expected_data, data);
             }
             event => {
@@ -122,9 +120,9 @@ impl ClientTester {
     pub async fn receive_status(&mut self, expected_bytes: &[u8]) {
         let expected_status = self.codecs.decode_status(expected_bytes);
         let (stream, client) = self.connection_state.connected();
-        let event = stream.progress(client).await.unwrap();
+        let event = stream.next(client).await.unwrap();
         match event {
-            ClientFlowEvent::StatusReceived { status } => {
+            client::Event::StatusReceived { status } => {
                 assert_eq!(expected_status, status);
             }
             event => {
@@ -133,18 +131,16 @@ impl ClientTester {
         }
     }
 
-    async fn receive_error(&mut self) -> ClientFlowError {
+    async fn receive_error(&mut self) -> client::Error {
         let error = match &mut self.connection_state {
-            ConnectionState::Connected { stream, client } => {
-                stream.progress(client).await.unwrap_err()
-            }
+            ConnectionState::Connected { stream, client } => stream.next(client).await.unwrap_err(),
             ConnectionState::Disconnected => {
                 panic!("Client is already disconnected")
             }
         };
 
         match error {
-            StreamError::Flow(err) => err,
+            stream::Error::State(err) => err,
             err => {
                 panic!("Client emitted unexpected error: {err:?}");
             }
@@ -154,7 +150,7 @@ impl ClientTester {
     pub async fn receive_error_because_expected_crlf_got_lf(&mut self, expected_bytes: &[u8]) {
         let error = self.receive_error().await;
         match error {
-            ClientFlowError::ExpectedCrlfGotLf { discarded_bytes } => {
+            client::Error::ExpectedCrlfGotLf { discarded_bytes } => {
                 assert_eq!(
                     expected_bytes.as_bstr(),
                     discarded_bytes.declassify().as_bstr()
@@ -169,7 +165,7 @@ impl ClientTester {
     pub async fn receive_error_because_malformed_message(&mut self, expected_bytes: &[u8]) {
         let error = self.receive_error().await;
         match error {
-            ClientFlowError::MalformedMessage { discarded_bytes } => {
+            client::Error::MalformedMessage { discarded_bytes } => {
                 assert_eq!(
                     expected_bytes.as_bstr(),
                     discarded_bytes.declassify().as_bstr()
@@ -186,13 +182,13 @@ impl ClientTester {
 #[allow(clippy::large_enum_variant)]
 enum ConnectionState {
     /// Connection to server established.
-    Connected { stream: Stream, client: ClientFlow },
+    Connected { stream: Stream, client: Client },
     /// Connection dropped.
     Disconnected,
 }
 
 impl ConnectionState {
-    fn connected(&mut self) -> (&mut Stream, &mut ClientFlow) {
+    fn connected(&mut self) -> (&mut Stream, &mut Client) {
         match self {
             ConnectionState::Connected { stream, client } => (stream, client),
             ConnectionState::Disconnected => {
@@ -209,6 +205,6 @@ impl ConnectionState {
 
 /// Enqueued command that can be used for assertions.
 pub struct EnqueuedCommand {
-    handle: ClientFlowCommandHandle,
+    handle: CommandHandle,
     command: Command<'static>,
 }
