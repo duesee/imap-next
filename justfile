@@ -77,7 +77,7 @@ audit: cargo_deny
 # Measure test coverage
 coverage: install_rust_llvm_tools_preview install_cargo_grcov
     mkdir -p target/coverage
-    RUSTFLAGS="-Cinstrument-coverage" LLVM_PROFILE_FILE="coverage-%m-%p.profraw" cargo test -p imap-next -p flow-test --all-features
+    RUSTFLAGS="-Cinstrument-coverage" LLVM_PROFILE_FILE="coverage-%m-%p.profraw" cargo test -p imap-next -p integration-test --all-features
     grcov . \
         --source-dir . \
         --binary-path target/debug \
@@ -87,7 +87,7 @@ coverage: install_rust_llvm_tools_preview install_cargo_grcov
         --llvm > target/coverage/coverage.lcov
     # TODO: Create files in `target/coverage` only.
     rm *.profraw
-    rm flow-test/*.profraw
+    rm integration-test/*.profraw
 
 # Check minimal dependency versions and MSRV
 minimal_versions: install_rust_1_70 install_rust_nightly
