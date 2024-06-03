@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use flow_test::test_setup::TestSetup;
+use integration_test::test_setup::TestSetup;
 
 #[test]
 fn noop() {
