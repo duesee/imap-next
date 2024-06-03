@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use colored::Colorize;
-use imap_flow::{
+use imap_next::{
     client::{ClientFlow, ClientFlowError, ClientFlowEvent, ClientFlowOptions},
     server::{ServerFlow, ServerFlowError, ServerFlowEvent, ServerFlowOptions},
     stream::{Stream, StreamError},

@@ -1,5 +1,5 @@
 use bstr::ByteSlice;
-use imap_flow::{
+use imap_next::{
     server::{ServerFlow, ServerFlowError, ServerFlowEvent, ServerFlowOptions},
     stream::{Stream, StreamError},
 };

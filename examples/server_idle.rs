@@ -1,6 +1,6 @@
 use std::{io::BufRead, num::NonZeroU32};
 
-use imap_flow::{
+use imap_next::{
     server::{ServerFlow, ServerFlowEvent, ServerFlowOptions},
     stream::Stream,
 };

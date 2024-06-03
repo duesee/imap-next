@@ -1,10 +1,10 @@
 [package]
-name = "imap-flow"
+name = "imap-next"
 description = "Thin abstraction over IMAP's distinct protocol flows"
 keywords = ["email", "imap", "protocol", "network"]
 categories = ["email", "network-programming"]
 version = "0.1.0"
-repository = "https://github.com/duesee/imap-flow"
+repository = "https://github.com/duesee/imap-next"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 exclude = [

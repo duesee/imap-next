@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Created project board
 * Setup CI: Check, Build, Lint, Audit, Coverage, ...
 * Licensed everything as "APACHE OR MIT"
-* `imap-flow`
+* `imap-next`
     * Implemented literal handling, handles, events, and examples
     * Implemented AUTHENTICATE and IDLE
     * Implemented a self-test, and tested against a few providers
@@ -37,4 +37,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     * Implemented a task scheduler/manager
 * `tag-generator`
 
-[Unreleased]: https://github.com/duesee/imap-flow/compare/0a89b5e180ad7dfd3d67d1184370fa1028ea92b4...HEAD
+[Unreleased]: https://github.com/duesee/imap-next/compare/0a89b5e180ad7dfd3d67d1184370fa1028ea92b4...HEAD

@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use imap_flow::{
+use imap_next::{
     client::{ClientFlow, ClientFlowEvent, ClientFlowOptions},
     stream::Stream,
 };

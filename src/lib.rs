@@ -14,7 +14,7 @@ pub mod stream;
 mod tests;
 pub mod types;
 
-// Test examples from imap-flow's README.
+// Test examples from imap-next's README.
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]
 pub struct ReadmeDoctests;
@@ -62,7 +62,7 @@ pub enum FlowInterrupt<E> {
     Error(E),
 }
 
-/// User of `imap-flow` must perform an IO operation to progress the protocol flow.
+/// User of `imap-next` must perform an IO operation to progress the protocol flow.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FlowIo {
     /// More bytes must be read and passed to [`Flow::enqueue_input`].

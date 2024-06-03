@@ -166,7 +166,7 @@ impl Stream {
     /// Return the underlying stream for debug purposes (or experiments).
     ///
     /// Note: Writing to or reading from the stream may introduce
-    /// conflicts with `imap-flow`.
+    /// conflicts with `imap-next`.
     pub fn stream_mut(&mut self) -> &mut TcpStream {
         &mut self.stream
     }
