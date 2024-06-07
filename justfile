@@ -55,8 +55,7 @@ cargo_deny: install_cargo_deny
 
 [private]
 cargo_semver: install_cargo_semver_checks
-    # TODO(#8)
-    # cargo semver-checks check-release --only-explicit-features -p imap-next
+    cargo semver-checks check-release --only-explicit-features -p imap-next
 
 # Test multiple configurations
 test: (test_impl ""           ""               ) \
