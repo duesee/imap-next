@@ -5,5 +5,5 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-imap-types = { version = "2.0.0", features = ["unvalidated"] }
+imap-types = { version = "2.0.0-alpha.1", features = ["unvalidated"] }
 rand = "0.8.5"
