@@ -577,6 +577,6 @@ pub enum Error {
     MalformedMessage { discarded_bytes: Secret<Box<[u8]>> },
     #[error("Literal was rejected because it was too long")]
     LiteralTooLong { discarded_bytes: Secret<Box<[u8]>> },
-    #[error("Command was rejected because it was too long")]
+    #[error("Command is too long")]
     CommandTooLong { discarded_bytes: Secret<Box<[u8]>> },
 }
