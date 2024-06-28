@@ -5,7 +5,7 @@ use imap_codec::{
 };
 use imap_types::{
     command::Command,
-    response::{Data, Greeting, Response, Status},
+    response::{CommandContinuationRequest, Data, Greeting, Response, Status},
 };
 
 /// Contains all codecs from `imap-codec`.
@@ -30,6 +30,17 @@ impl Codecs {
 
     pub fn encode_response(&self, response: &Response) -> Vec<u8> {
         self.response_codec.encode(response).dump()
+    }
+
+    pub fn encode_continuation_request(
+        &self,
+        continuation_request: &CommandContinuationRequest,
+    ) -> Vec<u8> {
+        self.response_codec
+            .encode(&Response::CommandContinuationRequest(
+                continuation_request.clone(),
+            ))
+            .dump()
     }
 
     pub fn encode_data(&self, data: &Data) -> Vec<u8> {
@@ -107,6 +118,17 @@ impl Codecs {
         }
     }
 
+    pub fn decode_continuation_request<'a>(
+        &self,
+        bytes: &'a [u8],
+    ) -> CommandContinuationRequest<'a> {
+        let Response::CommandContinuationRequest(expected_data) = self.decode_response(bytes)
+        else {
+            panic!("Got wrong response type when parsing continuation request from {bytes:?}")
+        };
+        expected_data
+    }
+
     pub fn decode_data<'a>(&self, bytes: &'a [u8]) -> Data<'a> {
         let Response::Data(expected_data) = self.decode_response(bytes) else {
             panic!("Got wrong response type when parsing data from {bytes:?}")
@@ -152,6 +174,20 @@ impl Codecs {
             "Bytes must contain a normalized response"
         );
         response
+    }
+
+    pub fn decode_continuation_request_normalized<'a>(
+        &self,
+        bytes: &'a [u8],
+    ) -> CommandContinuationRequest<'a> {
+        let continuation_request = self.decode_continuation_request(bytes);
+        let normalized_bytes = self.encode_continuation_request(&continuation_request);
+        assert_eq!(
+            normalized_bytes.as_bstr(),
+            bytes.as_bstr(),
+            "Bytes must contain a normalized continuation request"
+        );
+        continuation_request
     }
 
     pub fn decode_data_normalized<'a>(&self, bytes: &'a [u8]) -> Data<'a> {
