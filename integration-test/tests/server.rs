@@ -252,3 +252,58 @@ fn command_with_literals_larger_than_max_command_size() {
         );
     }
 }
+
+#[test]
+fn idle_accepted() {
+    let (rt, mut server, mut client) = TestSetup::default().setup_server();
+
+    let greeting = b"* OK ...\r\n";
+    rt.run2(server.send_greeting(greeting), client.receive(greeting));
+
+    // Client starts IDLE
+    let idle = b"A1 IDLE\r\n";
+    rt.run2(client.send(idle), server.receive_idle(idle));
+
+    // Server accepts IDLE
+    let continuation_request = b"+ idling\r\n";
+    rt.run2(
+        server.send_idle_accepted(continuation_request),
+        client.receive(continuation_request),
+    );
+
+    // Client ends IDLE
+    let idle_done = b"DONE\r\n";
+    rt.run2(client.send(idle_done), server.receive_idle_done());
+
+    // Server is able to receive commands
+    let noop = b"A2 NOOP\r\n";
+    rt.run2(client.send(noop), server.receive_command(noop));
+
+    // Server is able to send responses
+    let status = b"A2 OK ...\r\n";
+    rt.run2(server.send_status(status), client.receive(status));
+}
+
+#[test]
+fn idle_rejected() {
+    let (rt, mut server, mut client) = TestSetup::default().setup_server();
+
+    let greeting = b"* OK ...\r\n";
+    rt.run2(server.send_greeting(greeting), client.receive(greeting));
+
+    // Client starts IDLE
+    let idle = b"A1 IDLE\r\n";
+    rt.run2(client.send(idle), server.receive_idle(idle));
+
+    // Server rejects IDLE
+    let status = b"A1 NO rise and shine\r\n";
+    rt.run2(server.send_idle_rejected(status), client.receive(status));
+
+    // Server is able to receive commands
+    let noop = b"A2 NOOP\r\n";
+    rt.run2(client.send(noop), server.receive_command(noop));
+
+    // Server is able to send responses
+    let status = b"A2 OK ...\r\n";
+    rt.run2(server.send_status(status), client.receive(status));
+}
