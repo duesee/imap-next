@@ -1,9 +1,10 @@
 use bstr::ByteSlice;
 use imap_codec::{
     decode::Decoder, encode::Encoder, AuthenticateDataCodec, CommandCodec, GreetingCodec,
-    IdleDoneCodec, ResponseCodec,
+    ResponseCodec,
 };
 use imap_types::{
+    auth::AuthenticateData,
     command::Command,
     response::{CommandContinuationRequest, Data, Greeting, Response, Status},
 };
@@ -16,7 +17,6 @@ pub struct Codecs {
     pub command_codec: CommandCodec,
     pub response_codec: ResponseCodec,
     pub authenticate_data_codec: AuthenticateDataCodec,
-    pub idle_done_codec: IdleDoneCodec,
 }
 
 impl Codecs {
@@ -52,6 +52,12 @@ impl Codecs {
     pub fn encode_status(&self, status: &Status) -> Vec<u8> {
         self.response_codec
             .encode(&Response::Status(status.clone()))
+            .dump()
+    }
+
+    pub fn encode_authenticate_data(&self, authenticate_data: &AuthenticateData) -> Vec<u8> {
+        self.authenticate_data_codec
+            .encode(authenticate_data)
             .dump()
     }
 
@@ -143,6 +149,27 @@ impl Codecs {
         expected_status
     }
 
+    pub fn decode_authenticate_data<'a>(&self, bytes: &'a [u8]) -> AuthenticateData<'a> {
+        match self.authenticate_data_codec.decode(bytes) {
+            Ok((rem, response)) => {
+                if !rem.is_empty() {
+                    panic!(
+                        "Expected single authenticate data but there are remaining bytes {:?}",
+                        rem.as_bstr()
+                    )
+                }
+                response
+            }
+            Err(err) => {
+                panic!(
+                    "Got error {:?} when parsing authenticate data bytes {:?}",
+                    err,
+                    bytes.as_bstr()
+                )
+            }
+        }
+    }
+
     pub fn decode_greeting_normalized<'a>(&self, bytes: &'a [u8]) -> Greeting<'a> {
         let greeting = self.decode_greeting(bytes);
         let normalized_bytes = self.encode_greeting(&greeting);
@@ -210,5 +237,16 @@ impl Codecs {
             "Bytes must contain a normalized status"
         );
         status
+    }
+
+    pub fn decode_authenticate_data_normalized<'a>(&self, bytes: &'a [u8]) -> AuthenticateData<'a> {
+        let authenticate_data = self.decode_authenticate_data(bytes);
+        let normalized_bytes = self.encode_authenticate_data(&authenticate_data);
+        assert_eq!(
+            normalized_bytes.as_bstr(),
+            bytes.as_bstr(),
+            "Bytes must contain a normalized authenticate data"
+        );
+        authenticate_data
     }
 }
