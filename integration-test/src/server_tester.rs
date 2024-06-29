@@ -1,6 +1,6 @@
 use bstr::ByteSlice;
 use imap_next::{
-    server::{self, Server},
+    server::{self, ResponseHandle, Server},
     stream::{self, Stream},
 };
 use imap_types::{bounded_static::ToBoundedStatic, response::Response};
@@ -58,116 +58,129 @@ impl ServerTester {
         }
     }
 
-    pub async fn receive_command(&mut self, expected_bytes: &[u8]) {
-        let expected_command = self.codecs.decode_command(expected_bytes);
+    pub fn enqueue_data(&mut self, bytes: &[u8]) -> EnqueuedResponse {
+        let data = self.codecs.decode_data_normalized(bytes).to_static();
+        let (_, server) = self.connection_state.greeted();
+        let handle = server.enqueue_data(data.to_static());
+        EnqueuedResponse {
+            response: Response::Data(data),
+            handle,
+        }
+    }
+
+    pub fn enqueue_status(&mut self, bytes: &[u8]) -> EnqueuedResponse {
+        let status = self.codecs.decode_status_normalized(bytes).to_static();
+        let (_, server) = self.connection_state.greeted();
+        let handle = server.enqueue_status(status.to_static());
+        EnqueuedResponse {
+            response: Response::Status(status),
+            handle,
+        }
+    }
+
+    pub fn set_idle_accept(&mut self, bytes: &[u8]) -> EnqueuedResponse {
+        let continuation_request = self
+            .codecs
+            .decode_continuation_request_normalized(bytes)
+            .to_static();
+        let (_, server) = self.connection_state.greeted();
+        let Ok(handle) = server.idle_accept(continuation_request.to_static()) else {
+            panic!("Server is in unexpected state");
+        };
+        EnqueuedResponse {
+            response: Response::CommandContinuationRequest(continuation_request),
+            handle,
+        }
+    }
+
+    pub fn set_idle_reject(&mut self, bytes: &[u8]) -> EnqueuedResponse {
+        let status = self.codecs.decode_status_normalized(bytes).to_static();
+        let (_, server) = self.connection_state.greeted();
+        let Ok(handle) = server.idle_reject(status.to_static()) else {
+            panic!("Server is in unexpected state");
+        };
+        EnqueuedResponse {
+            response: Response::Status(status),
+            handle,
+        }
+    }
+
+    pub fn set_authenticate_continue(&mut self, bytes: &[u8]) -> EnqueuedResponse {
+        let authenticate_data = self
+            .codecs
+            .decode_continuation_request_normalized(bytes)
+            .to_static();
+        let (_, server) = self.connection_state.greeted();
+        let Ok(handle) = server.authenticate_continue(authenticate_data.to_static()) else {
+            panic!("Server is in unexpected state");
+        };
+        EnqueuedResponse {
+            response: Response::CommandContinuationRequest(authenticate_data),
+            handle,
+        }
+    }
+
+    pub fn set_authenticate_finish(&mut self, bytes: &[u8]) -> EnqueuedResponse {
+        let authenticate_data = self.codecs.decode_status_normalized(bytes).to_static();
+        let (_, server) = self.connection_state.greeted();
+        let Ok(handle) = server.authenticate_finish(authenticate_data.to_static()) else {
+            panic!("Server is in unexpected state");
+        };
+        EnqueuedResponse {
+            response: Response::Status(authenticate_data),
+            handle,
+        }
+    }
+
+    pub async fn progress_response(&mut self, enqueued_response: EnqueuedResponse) {
         let (stream, server) = self.connection_state.greeted();
         let event = stream.next(server).await.unwrap();
         match event {
-            server::Event::CommandReceived { command } => {
-                assert_eq!(expected_command, command);
+            server::Event::ResponseSent { handle, response } => {
+                assert_eq!(enqueued_response.handle, handle);
+                assert_eq!(enqueued_response.response, response);
             }
             event => {
-                panic!("Server emitted unexpected event: {event:?}");
+                panic!("Server has unexpected event: {event:?}");
             }
         }
     }
 
-    pub async fn receive_idle(&mut self, expected_bytes: &[u8]) {
-        let expected_command = self.codecs.decode_command(expected_bytes);
+    /// Progresses internal responses without expecting any results.
+    pub async fn progress_internal_responses<T>(&mut self) -> T {
         let (stream, server) = self.connection_state.greeted();
-        let event = stream.next(server).await.unwrap();
-        match event {
-            server::Event::IdleCommandReceived { tag } => {
-                assert_eq!(expected_command.tag, tag);
-            }
-            event => {
-                panic!("Server emitted unexpected event: {event:?}");
-            }
-        }
-    }
-
-    pub async fn receive_idle_done(&mut self) {
-        let (stream, server) = self.connection_state.greeted();
-        let event = stream.next(server).await.unwrap();
-        match event {
-            server::Event::IdleDoneReceived => (),
-            event => {
-                panic!("Server emitted unexpected event: {event:?}");
-            }
-        }
+        let result = stream.next(server).await;
+        panic!("Server has unexpected result: {result:?}");
     }
 
     pub async fn send_data(&mut self, bytes: &[u8]) {
-        let enqueued_data = self.codecs.decode_data_normalized(bytes);
-        let (stream, server) = self.connection_state.greeted();
-        let enqueued_handle = server.enqueue_data(enqueued_data.to_static());
-        let event = stream.next(server).await.unwrap();
-        match event {
-            server::Event::ResponseSent { handle, response } => {
-                assert_eq!(enqueued_handle, handle);
-                assert_eq!(Response::Data(enqueued_data), response);
-            }
-            event => {
-                panic!("Server has unexpected event: {event:?}");
-            }
-        }
+        let enqueued_response = self.enqueue_data(bytes);
+        self.progress_response(enqueued_response).await;
     }
 
     pub async fn send_status(&mut self, bytes: &[u8]) {
-        let enqueued_status = self.codecs.decode_status_normalized(bytes);
-        let (stream, server) = self.connection_state.greeted();
-        let enqueued_handle = server.enqueue_status(enqueued_status.to_static());
-        let event = stream.next(server).await.unwrap();
-        match event {
-            server::Event::ResponseSent { handle, response } => {
-                assert_eq!(enqueued_handle, handle);
-                assert_eq!(Response::Status(enqueued_status), response);
-            }
-            event => {
-                panic!("Server has unexpected event: {event:?}");
-            }
-        }
+        let enqueued_response = self.enqueue_status(bytes);
+        self.progress_response(enqueued_response).await;
     }
 
     pub async fn send_idle_accepted(&mut self, bytes: &[u8]) {
-        let enqueued_continuation_request =
-            self.codecs.decode_continuation_request_normalized(bytes);
-        let (stream, server) = self.connection_state.greeted();
-        let Ok(enqueued_handle) = server.idle_accept(enqueued_continuation_request.to_static())
-        else {
-            panic!("Server is in unexpected state");
-        };
-        let event = stream.next(server).await.unwrap();
-        match event {
-            server::Event::ResponseSent { handle, response } => {
-                assert_eq!(enqueued_handle, handle);
-                assert_eq!(
-                    Response::CommandContinuationRequest(enqueued_continuation_request),
-                    response
-                );
-            }
-            event => {
-                panic!("Server has unexpected event: {event:?}");
-            }
-        }
+        let enqueued_response = self.set_idle_accept(bytes);
+        self.progress_response(enqueued_response).await;
     }
 
     pub async fn send_idle_rejected(&mut self, bytes: &[u8]) {
-        let enqueued_status = self.codecs.decode_status_normalized(bytes);
-        let (stream, server) = self.connection_state.greeted();
-        let Ok(enqueued_handle) = server.idle_reject(enqueued_status.to_static()) else {
-            panic!("Server is in unexpected state");
-        };
-        let event = stream.next(server).await.unwrap();
-        match event {
-            server::Event::ResponseSent { handle, response } => {
-                assert_eq!(enqueued_handle, handle);
-                assert_eq!(Response::Status(enqueued_status), response);
-            }
-            event => {
-                panic!("Server has unexpected event: {event:?}");
-            }
-        }
+        let enqueued_response = self.set_idle_reject(bytes);
+        self.progress_response(enqueued_response).await;
+    }
+
+    pub async fn send_authenticate_continue(&mut self, bytes: &[u8]) {
+        let enqueued_response = self.set_authenticate_continue(bytes);
+        self.progress_response(enqueued_response).await;
+    }
+
+    pub async fn send_authenticate_finish(&mut self, bytes: &[u8]) {
+        let enqueued_response = self.set_authenticate_finish(bytes);
+        self.progress_response(enqueued_response).await;
     }
 
     async fn receive_error(&mut self) -> server::Error {
@@ -240,12 +253,73 @@ impl ServerTester {
             }
         }
     }
-
-    /// Progresses internal responses without expecting any results.
-    pub async fn progress_internal_responses<T>(&mut self) -> T {
+    pub async fn receive_command(&mut self, expected_bytes: &[u8]) {
+        let expected_command = self.codecs.decode_command(expected_bytes);
         let (stream, server) = self.connection_state.greeted();
-        let result = stream.next(server).await;
-        panic!("Server has unexpected result: {result:?}");
+        let event = stream.next(server).await.unwrap();
+        match event {
+            server::Event::CommandReceived { command } => {
+                assert_eq!(expected_command, command);
+            }
+            event => {
+                panic!("Server emitted unexpected event: {event:?}");
+            }
+        }
+    }
+
+    pub async fn receive_idle(&mut self, expected_bytes: &[u8]) {
+        let expected_command = self.codecs.decode_command(expected_bytes);
+        let (stream, server) = self.connection_state.greeted();
+        let event = stream.next(server).await.unwrap();
+        match event {
+            server::Event::IdleCommandReceived { tag } => {
+                assert_eq!(expected_command.tag, tag);
+            }
+            event => {
+                panic!("Server emitted unexpected event: {event:?}");
+            }
+        }
+    }
+
+    pub async fn receive_idle_done(&mut self) {
+        let (stream, server) = self.connection_state.greeted();
+        let event = stream.next(server).await.unwrap();
+        match event {
+            server::Event::IdleDoneReceived => (),
+            event => {
+                panic!("Server emitted unexpected event: {event:?}");
+            }
+        }
+    }
+
+    pub async fn receive_authenticate_command(&mut self, expected_bytes: &[u8]) {
+        let expected_command = self.codecs.decode_command(expected_bytes);
+        let (stream, server) = self.connection_state.greeted();
+        let event = stream.next(server).await.unwrap();
+        match event {
+            server::Event::CommandAuthenticateReceived {
+                command_authenticate,
+            } => {
+                assert_eq!(expected_command, command_authenticate.into());
+            }
+            event => {
+                panic!("Server emitted unexpected event: {event:?}");
+            }
+        }
+    }
+
+    pub async fn receive_authenticate_data(&mut self, expected_bytes: &[u8]) {
+        let expected_authenticate_data = self.codecs.decode_authenticate_data(expected_bytes);
+        let (stream, server) = self.connection_state.greeted();
+        let event = stream.next(server).await.unwrap();
+        match event {
+            server::Event::AuthenticateDataReceived { authenticate_data } => {
+                assert_eq!(expected_authenticate_data, authenticate_data);
+            }
+            event => {
+                panic!("Server emitted unexpected event: {event:?}");
+            }
+        }
     }
 }
 
@@ -276,4 +350,10 @@ impl ConnectionState {
     fn take(&mut self) -> ConnectionState {
         std::mem::replace(self, ConnectionState::Disconnected)
     }
+}
+
+/// Enqueued response that can be used for assertions.
+pub struct EnqueuedResponse {
+    handle: ResponseHandle,
+    response: Response<'static>,
 }

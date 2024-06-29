@@ -5,7 +5,7 @@ use imap_next::{
     client::{self, Client, CommandHandle},
     stream::{self, Stream},
 };
-use imap_types::{bounded_static::ToBoundedStatic, command::Command, response::Response};
+use imap_types::{bounded_static::ToBoundedStatic, command::Command};
 use tokio::net::TcpStream;
 use tracing::trace;
 
@@ -54,9 +54,24 @@ impl ClientTester {
         EnqueuedCommand { command, handle }
     }
 
-    pub fn set_idle_done(&mut self) -> Option<CommandHandle> {
+    pub fn set_idle_done(&mut self, idle_handle: CommandHandle) {
         let (_, client) = self.connection_state.connected();
-        client.set_idle_done()
+        let Some(handle) = client.set_idle_done() else {
+            panic!("Client is in unexpected state");
+        };
+        assert_eq!(idle_handle, handle);
+    }
+
+    pub fn set_authenticate_data(&mut self, authenticate_handle: CommandHandle, bytes: &[u8]) {
+        let authenticate_data = self
+            .codecs
+            .decode_authenticate_data_normalized(bytes)
+            .to_static();
+        let (_, client) = self.connection_state.connected();
+        let Ok(handle) = client.set_authenticate_data(authenticate_data.to_static()) else {
+            panic!("Client is in unexpected state");
+        };
+        assert_eq!(authenticate_handle, handle);
     }
 
     pub async fn progress_command(&mut self, enqueued_command: EnqueuedCommand) {
@@ -99,6 +114,19 @@ impl ClientTester {
         }
     }
 
+    pub async fn progress_authenticate(&mut self, authenticate_handle: CommandHandle) {
+        let (stream, client) = self.connection_state.connected();
+        let event = stream.next(client).await.unwrap();
+        match event {
+            client::Event::AuthenticateStarted { handle } => {
+                assert_eq!(authenticate_handle, handle);
+            }
+            event => {
+                panic!("Client emitted unexpected event: {event:?}");
+            }
+        }
+    }
+
     pub async fn progress_rejected_command(
         &mut self,
         enqueued_command: EnqueuedCommand,
@@ -123,6 +151,13 @@ impl ClientTester {
         }
     }
 
+    /// Progresses internal commands without expecting any results.
+    pub async fn progress_internal_commands<T>(&mut self) -> T {
+        let (stream, client) = self.connection_state.connected();
+        let result = stream.next(client).await;
+        panic!("Client has unexpected result: {result:?}");
+    }
+
     pub async fn send_command(&mut self, bytes: &[u8]) {
         let enqueued_command = self.enqueue_command(bytes);
         self.progress_command(enqueued_command).await;
@@ -135,11 +170,14 @@ impl ClientTester {
     }
 
     pub async fn send_idle_done(&mut self, idle_handle: CommandHandle) {
-        let Some(handle) = self.set_idle_done() else {
-            panic!("Client is in unexpected state");
-        };
-        assert_eq!(idle_handle, handle);
+        self.set_idle_done(idle_handle);
         self.progress_idle_done(idle_handle).await;
+    }
+
+    pub async fn send_authenticate(&mut self, bytes: &[u8]) -> CommandHandle {
+        let enqueued_command = self.enqueue_command(bytes);
+        self.progress_authenticate(enqueued_command.handle).await;
+        enqueued_command.handle
     }
 
     pub async fn send_rejected_command(&mut self, command_bytes: &[u8], status_bytes: &[u8]) {
@@ -181,7 +219,7 @@ impl ClientTester {
         idle_handle: CommandHandle,
         expected_bytes: &[u8],
     ) {
-        let expected_continuation_request = self.codecs.decode_response(expected_bytes);
+        let expected_continuation_request = self.codecs.decode_continuation_request(expected_bytes);
         let (stream, client) = self.connection_state.connected();
         let event = stream.next(client).await.unwrap();
         match event {
@@ -190,10 +228,7 @@ impl ClientTester {
                 continuation_request,
             } => {
                 assert_eq!(handle, idle_handle);
-                assert_eq!(
-                    expected_continuation_request,
-                    Response::CommandContinuationRequest(continuation_request)
-                );
+                assert_eq!(expected_continuation_request, continuation_request);
             }
             event => {
                 panic!("Client emitted unexpected event: {event:?}");
@@ -213,6 +248,56 @@ impl ClientTester {
             client::Event::IdleRejected { handle, status } => {
                 assert_eq!(handle, idle_handle);
                 assert_eq!(status, expected_status);
+            }
+            event => {
+                panic!("Client emitted unexpected event: {event:?}");
+            }
+        }
+    }
+
+    pub async fn receive_authenticate_continuation_request(
+        &mut self,
+        authenticate_request: CommandHandle,
+        expected_bytes: &[u8],
+    ) {
+        let expected_continuation_request = self.codecs.decode_continuation_request(expected_bytes);
+        let (stream, client) = self.connection_state.connected();
+        let event = stream.next(client).await.unwrap();
+        match event {
+            client::Event::AuthenticateContinuationRequestReceived {
+                handle,
+                continuation_request,
+            } => {
+                assert_eq!(handle, authenticate_request);
+                assert_eq!(expected_continuation_request, continuation_request);
+            }
+            event => {
+                panic!("Client emitted unexpected event: {event:?}");
+            }
+        }
+    }
+
+    pub async fn receive_authenticate_status(
+        &mut self,
+        authenticate_request: CommandHandle,
+        expected_authenticate_bytes: &[u8],
+        expected_status_bytes: &[u8],
+    ) {
+        let expected_command = self
+            .codecs
+            .decode_command_normalized(expected_authenticate_bytes);
+        let expected_status = self.codecs.decode_status_normalized(expected_status_bytes);
+        let (stream, client) = self.connection_state.connected();
+        let event = stream.next(client).await.unwrap();
+        match event {
+            client::Event::AuthenticateStatusReceived {
+                handle,
+                command_authenticate,
+                status,
+            } => {
+                assert_eq!(handle, authenticate_request);
+                assert_eq!(expected_command, command_authenticate.into());
+                assert_eq!(expected_status, status);
             }
             event => {
                 panic!("Client emitted unexpected event: {event:?}");

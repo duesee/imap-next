@@ -307,3 +307,151 @@ fn idle_rejected() {
     let status = b"A2 OK ...\r\n";
     rt.run2(server.send_status(status), client.receive(status));
 }
+
+#[test]
+fn authenticate_accepted() {
+    let (rt, mut server, mut client) = TestSetup::default().setup_server();
+
+    let greeting = b"* OK ...\r\n";
+    rt.run2(server.send_greeting(greeting), client.receive(greeting));
+
+    // Client initiates AUTHENTICATE
+    let authenticate = b"A1 AUTHENTICATE PLAIN dGVzdAB0ZXN0AHRlc3Q=\r\n";
+    rt.run2(
+        client.send(authenticate),
+        server.receive_authenticate_command(authenticate),
+    );
+
+    // Server accepts AUTHENTICATE
+    let status = b"A1 OK success\r\n";
+    rt.run2(
+        server.send_authenticate_finish(status),
+        client.receive(status),
+    );
+
+    // Server is able to receive commands
+    let noop = b"A2 NOOP\r\n";
+    rt.run2(client.send(noop), server.receive_command(noop));
+
+    // Server is able to send responses
+    let status = b"A2 OK ...\r\n";
+    rt.run2(server.send_status(status), client.receive(status));
+}
+
+#[test]
+fn authenticate_with_more_data_accepted() {
+    let (rt, mut server, mut client) = TestSetup::default().setup_server();
+
+    let greeting = b"* OK ...\r\n";
+    rt.run2(server.send_greeting(greeting), client.receive(greeting));
+
+    // Client initiates AUTHENTICATE
+    let authenticate = b"A1 AUTHENTICATE PLAIN\r\n";
+    rt.run2(
+        client.send(authenticate),
+        server.receive_authenticate_command(authenticate),
+    );
+
+    // Server requests more data
+    let continuation_request = b"+ \r\n";
+    rt.run2(
+        server.send_authenticate_continue(continuation_request),
+        client.receive(continuation_request),
+    );
+
+    // Client sends more data
+    let authenticate_data = b"dGVzdAB0ZXN0AHRlc3Q=\r\n";
+    rt.run2(
+        client.send(authenticate_data),
+        server.receive_authenticate_data(authenticate_data),
+    );
+
+    // Server accepts AUTHENTICATE
+    let status = b"A1 OK success\r\n";
+    rt.run2(
+        server.send_authenticate_finish(status),
+        client.receive(status),
+    );
+
+    // Server is able to receive commands
+    let noop = b"A2 NOOP\r\n";
+    rt.run2(client.send(noop), server.receive_command(noop));
+
+    // Server is able to send responses
+    let status = b"A2 OK ...\r\n";
+    rt.run2(server.send_status(status), client.receive(status));
+}
+
+#[test]
+fn authenticate_rejected() {
+    let (rt, mut server, mut client) = TestSetup::default().setup_server();
+
+    let greeting = b"* OK ...\r\n";
+    rt.run2(server.send_greeting(greeting), client.receive(greeting));
+
+    // Client initiates AUTHENTICATE
+    let authenticate = b"A1 AUTHENTICATE PLAIN dGVzdAB0ZXN0AHRlc3Q=\r\n";
+    rt.run2(
+        client.send(authenticate),
+        server.receive_authenticate_command(authenticate),
+    );
+
+    // Server rejects AUTHENTICATE
+    let status = b"A1 NO abort\r\n";
+    rt.run2(
+        server.send_authenticate_finish(status),
+        client.receive(status),
+    );
+
+    // Server is able to receive commands
+    let noop = b"A2 NOOP\r\n";
+    rt.run2(client.send(noop), server.receive_command(noop));
+
+    // Server is able to send responses
+    let status = b"A2 OK ...\r\n";
+    rt.run2(server.send_status(status), client.receive(status));
+}
+
+#[test]
+fn authenticate_with_more_data_rejected() {
+    let (rt, mut server, mut client) = TestSetup::default().setup_server();
+
+    let greeting = b"* OK ...\r\n";
+    rt.run2(server.send_greeting(greeting), client.receive(greeting));
+
+    // Client initiates AUTHENTICATE
+    let authenticate = b"A1 AUTHENTICATE PLAIN\r\n";
+    rt.run2(
+        client.send(authenticate),
+        server.receive_authenticate_command(authenticate),
+    );
+
+    // Server requests more data
+    let continuation_request = b"+ \r\n";
+    rt.run2(
+        server.send_authenticate_continue(continuation_request),
+        client.receive(continuation_request),
+    );
+
+    // Client sends more data
+    let authenticate_data = b"dGVzdAB0ZXN0AHRlc3Q=\r\n";
+    rt.run2(
+        client.send(authenticate_data),
+        server.receive_authenticate_data(authenticate_data),
+    );
+
+    // Server rejects AUTHENTICATE
+    let status = b"A1 NO abort\r\n";
+    rt.run2(
+        server.send_authenticate_finish(status),
+        client.receive(status),
+    );
+
+    // Server is able to receive commands
+    let noop = b"A2 NOOP\r\n";
+    rt.run2(client.send(noop), server.receive_command(noop));
+
+    // Server is able to send responses
+    let status = b"A2 OK ...\r\n";
+    rt.run2(server.send_status(status), client.receive(status));
+}
