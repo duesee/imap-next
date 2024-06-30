@@ -162,6 +162,20 @@ fn login_with_rejected_literal() {
 }
 
 #[test]
+fn login_with_non_sync_literal() {
+    let (rt, mut server, mut client) = TestSetup::default().setup_server();
+
+    let greeting = b"* OK ...\r\n";
+    rt.run2(server.send_greeting(greeting), client.receive(greeting));
+
+    let login = b"A1 LOGIN {5+}\r\nABCDE {5+}\r\nFGHIJ\r\n";
+    rt.run2(client.send(login), server.receive_command(login));
+
+    let status = b"A1 NO ...\r\n";
+    rt.run2(server.send_status(status), client.receive(status));
+}
+
+#[test]
 fn command_larger_than_max_command_size() {
     // The server will reject the command because it's larger than the max size
     let max_command_size_tests = [9, 10, 20, 100, 10 * 1024 * 1024];
