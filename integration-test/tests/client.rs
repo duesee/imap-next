@@ -204,6 +204,20 @@ fn login_with_literal_and_unexpected_status() {
 }
 
 #[test]
+fn login_with_non_sync_literal() {
+    let (rt, mut server, mut client) = TestSetup::default().setup_client();
+
+    let greeting = b"* OK ...\r\n";
+    rt.run2(server.send(greeting), client.receive_greeting(greeting));
+
+    let login = b"A1 LOGIN {5+}\r\nABCDE {5+}\r\nFGHIJ\r\n";
+    rt.run2(client.send_command(login), server.receive(login));
+
+    let status = b"A1 NO ...\r\n";
+    rt.run2(server.send(status), client.receive_status(status));
+}
+
+#[test]
 fn idle_accepted() {
     let (rt, mut server, mut client) = TestSetup::default().setup_client();
 
