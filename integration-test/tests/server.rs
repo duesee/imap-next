@@ -25,7 +25,7 @@ fn noop_with_large_lines() {
     let (rt, mut server, mut client) = setup.setup_server();
 
     // This number seems to be larger than the TCP buffer, so server/client must
-    // send/receive in parallel to prevent a dead lock.
+    // send/receive in parallel to prevent a deadlock.
     const LARGE: usize = 10 * 1024 * 1024;
 
     let greeting = &mut b"* OK ".to_vec();
