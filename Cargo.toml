@@ -42,5 +42,5 @@ members = [
 ]
 
 [patch.crates-io]
-imap-codec = { git = "https://github.com/duesee/imap-codec" }
-imap-types = { git = "https://github.com/duesee/imap-codec" }
+imap-codec = { git = "https://github.com/duesee/imap-codec", rev = "6aa651f6c74a4feb6696e7fb3e4c31b55ba64036" }
+imap-types = { git = "https://github.com/duesee/imap-codec", rev = "6aa651f6c74a4feb6696e7fb3e4c31b55ba64036" }
