@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use integration_test::test_setup::TestSetup;
 
 #[test]
@@ -15,6 +17,48 @@ fn noop() {
 
     let status = b"A1 OK ...\r\n";
     rt.run2(server.send_status(status), client.receive_status(status));
+}
+
+#[test]
+fn send_large_messages_in_parallel() {
+    let mut setup = TestSetup::default();
+    // Sending large messages takes some time, especially when running on a slow CI.
+    setup.runtime_options.timeout = Some(Duration::from_secs(10));
+    // Disable the limits because we want to send and receive large messages
+    setup.server_options.max_literal_size = u32::MAX;
+    setup.server_options.max_command_size = u32::MAX;
+
+    let (rt, mut server, mut client) = setup.setup();
+
+    // This number seems to be larger than the TCP buffer, so server/client must
+    // send/receive in parallel to prevent a deadlock.
+    const LARGE: usize = 10 * 1024 * 1024;
+
+    let greeting = b"* OK ...\r\n";
+    rt.run2(
+        server.send_greeting(greeting),
+        client.receive_greeting(greeting),
+    );
+
+    let noop = b"A1 NOOP\r\n";
+    rt.run2(client.send_command(noop), server.receive_command(noop));
+
+    // Create a large command
+    let login = &mut b"A1 LOGIN ABCDE ".to_vec();
+    login.extend(vec![b'x'; LARGE]);
+    login.extend(b"\r\n");
+
+    // Create a large response
+    let status = &mut b"A1 OK ".to_vec();
+    status.extend(vec![b'.'; LARGE]);
+    status.extend(b"\r\n");
+
+    // Client and server send large messages in parallel without actively
+    // receiving messages. This should not lead to a deadlock.
+    rt.run2(client.send_command(login), server.send_status(status));
+
+    // Client and server receive the messages
+    rt.run2(client.receive_status(status), server.receive_command(login));
 }
 
 #[test]
