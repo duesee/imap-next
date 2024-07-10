@@ -7,10 +7,10 @@ use imap_next::{
     stream::{self, Stream},
 };
 use imap_types::{
-    bounded_static::ToBoundedStatic,
     command::{Command, CommandBody},
     extensions::idle::IdleDone,
     response::{Code, Status},
+    ToStatic,
 };
 use once_cell::sync::Lazy;
 use thiserror::Error;

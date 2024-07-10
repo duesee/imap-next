@@ -18,10 +18,9 @@ expose_stream = []
 stream = ["dep:bytes", "dep:rustls", "dep:tokio", "dep:tokio-rustls"]
 
 [dependencies]
-bounded-static = "0.5.0"
 bytes = { version = "1.6.0", optional = true }
-imap-codec = { version = "2.0.0-alpha.1", features = ["starttls", "quirk_crlf_relaxed", "bounded-static", "ext_condstore_qresync", "ext_login_referrals", "ext_mailbox_referrals", "ext_id", "ext_sort_thread", "ext_binary", "ext_metadata", "ext_uidplus"] }
-imap-types = { version = "2.0.0-alpha.1", features = ["starttls", "ext_condstore_qresync", "ext_login_referrals", "ext_mailbox_referrals", "ext_id", "ext_sort_thread", "ext_binary", "ext_metadata", "ext_uidplus"] }
+imap-codec = { version = "2.0.0-alpha.1", features = ["starttls", "quirk_crlf_relaxed", "ext_condstore_qresync", "ext_login_referrals", "ext_mailbox_referrals", "ext_id", "ext_sort_thread", "ext_binary", "ext_metadata", "ext_uidplus"], git = "https://github.com/duesee/imap-codec", rev = "6bd83aff18fc12bad2b45c9fc50506b0c26ae2f6" }
+imap-types = { version = "2.0.0-alpha.1", features = ["starttls", "ext_condstore_qresync", "ext_login_referrals", "ext_mailbox_referrals", "ext_id", "ext_sort_thread", "ext_binary", "ext_metadata", "ext_uidplus"], git = "https://github.com/duesee/imap-codec", rev = "6bd83aff18fc12bad2b45c9fc50506b0c26ae2f6" }
 rustls = { version = "0.23.11", optional = true }
 thiserror = "1.0.61"
 tokio = { version = "1.38.0", optional = true, features = ["io-util", "macros", "net"] }
@@ -41,6 +40,3 @@ members = [
     "tag-generator",
 ]
 
-[patch.crates-io]
-imap-codec = { git = "https://github.com/duesee/imap-codec", rev = "6aa651f6c74a4feb6696e7fb3e4c31b55ba64036" }
-imap-types = { git = "https://github.com/duesee/imap-codec", rev = "6aa651f6c74a4feb6696e7fb3e4c31b55ba64036" }

@@ -1,8 +1,8 @@
-use bounded_static::IntoBoundedStatic;
 use imap_codec::decode::Decoder;
 use imap_types::{
     core::{LiteralMode, Tag},
     secret::Secret,
+    IntoStatic,
 };
 
 use crate::{
@@ -65,7 +65,7 @@ impl ReceiveState {
     pub fn next<C>(&mut self, codec: &C) -> Result<ReceiveEvent<C>, Interrupt<ReceiveError>>
     where
         C: Decoder,
-        for<'a> C::Message<'a>: IntoBoundedStatic<Static = C::Message<'static>>,
+        for<'a> C::Message<'a>: IntoStatic<Static = C::Message<'static>>,
     {
         loop {
             // Parse the next fragment
