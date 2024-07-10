@@ -1,6 +1,5 @@
 use std::fmt::{Debug, Formatter};
 
-use bounded_static::ToBoundedStatic;
 use imap_codec::{
     AuthenticateDataCodec, CommandCodec, GreetingCodec, IdleDoneCodec, ResponseCodec,
 };
@@ -14,6 +13,7 @@ use imap_types::{
         Status,
     },
     secret::Secret,
+    ToStatic,
 };
 use thiserror::Error;
 

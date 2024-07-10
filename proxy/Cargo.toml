@@ -8,9 +8,9 @@ license = "MIT OR Apache-2.0"
 anyhow = "1.0.86"
 argh = "0.1.12"
 colored = "2.1.0"
-imap-codec = { version = "2.0.0-alpha.1", features = ["bounded-static", "quirk_crlf_relaxed", "ext_id"] }
+imap-codec = { version = "2.0.0-alpha.1", features = ["quirk_crlf_relaxed", "ext_id"], git = "https://github.com/duesee/imap-codec", rev = "6bd83aff18fc12bad2b45c9fc50506b0c26ae2f6" }
 imap-next = { path = ".." }
-imap-types = { version = "2.0.0-alpha.1", features = ["bounded-static", "ext_id"] }
+imap-types = { version = "2.0.0-alpha.1", features = ["ext_id"], git = "https://github.com/duesee/imap-codec", rev = "6bd83aff18fc12bad2b45c9fc50506b0c26ae2f6"  }
 once_cell = "1.19.0"
 rustls-native-certs = "0.7.1"
 rustls-pemfile = "2.1.2"

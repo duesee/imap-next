@@ -5,7 +5,7 @@ use imap_next::{
     client::{self, Client, CommandHandle},
     stream::{self, Stream},
 };
-use imap_types::{bounded_static::ToBoundedStatic, command::Command};
+use imap_types::{command::Command, ToStatic};
 use tokio::net::TcpStream;
 use tracing::trace;
 

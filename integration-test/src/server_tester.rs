@@ -3,7 +3,7 @@ use imap_next::{
     server::{self, ResponseHandle, Server},
     stream::{self, Stream},
 };
-use imap_types::{bounded_static::ToBoundedStatic, response::Response};
+use imap_types::{response::Response, ToStatic};
 use tokio::net::TcpListener;
 use tracing::trace;
 
