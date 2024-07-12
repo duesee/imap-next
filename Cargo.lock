@@ -182,6 +182,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "byte_string"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11aade7a05aa8c3a351cedc44c3fc45806430543382fcc4743a9b757a2a0b4ed"
+
+[[package]]
 name = "bytes"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -659,6 +665,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "argh",
+ "byte_string",
  "colored",
  "imap-codec",
  "imap-next",

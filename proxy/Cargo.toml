@@ -7,6 +7,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 anyhow = "1.0.86"
 argh = "0.1.12"
+byte_string = "1.0.0"
 colored = "2.1.0"
 imap-codec = { version = "2.0.0-alpha.2", features = ["quirk_crlf_relaxed", "ext_id"] }
 imap-next = { path = ".." }
