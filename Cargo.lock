@@ -348,8 +348,9 @@ dependencies = [
 
 [[package]]
 name = "imap-codec"
-version = "2.0.0-alpha.1"
-source = "git+https://github.com/duesee/imap-codec?rev=6bd83aff18fc12bad2b45c9fc50506b0c26ae2f6#6bd83aff18fc12bad2b45c9fc50506b0c26ae2f6"
+version = "2.0.0-alpha.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f5b3f6b7f1c1dcba79867482c6fd94c0539b0115752397a7e7d0aff20f7e04d"
 dependencies = [
  "abnf-core",
  "base64",
@@ -376,8 +377,9 @@ dependencies = [
 
 [[package]]
 name = "imap-types"
-version = "2.0.0-alpha.1"
-source = "git+https://github.com/duesee/imap-codec?rev=6bd83aff18fc12bad2b45c9fc50506b0c26ae2f6#6bd83aff18fc12bad2b45c9fc50506b0c26ae2f6"
+version = "2.0.0-alpha.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7dafc29c11ece4433e74bf11b750cbd3135b0cf342975e29503503a1489cb00b"
 dependencies = [
  "base64",
  "bounded-static",

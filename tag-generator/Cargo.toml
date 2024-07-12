@@ -5,5 +5,5 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-imap-types = { version = "2.0.0-alpha.1", features = ["unvalidated"], git = "https://github.com/duesee/imap-codec", rev = "6bd83aff18fc12bad2b45c9fc50506b0c26ae2f6" }
+imap-types = { version = "2.0.0-alpha.2", features = ["unvalidated"] }
 rand = "0.8.5"
