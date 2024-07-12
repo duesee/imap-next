@@ -276,15 +276,20 @@ fn decrypt(
 
         loop {
             let mut plain_bytes_chunk = [0; 128];
+            // We need to handle different cases according to:
+            // https://docs.rs/rustls/latest/rustls/struct.Reader.html#method.read
             match tls.reader().read(&mut plain_bytes_chunk) {
-                Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                    // `rustls` doesn't have more data to yield, but it believes the
-                    // connection is open. Not sure why an error needs to be handled for
-                    // that case, but `tokio_rustls` does the same, see
-                    // https://github.com/rustls/tokio-rustls/blob/7448a86b7b5eb69b438dae0782c179e55a2d3e4f/src/common/mod.rs#L226
-                    break;
+                // There are no more bytes to read
+                Err(err) if err.kind() == ErrorKind::WouldBlock => break,
+                // The TLS session was closed uncleanly
+                Err(err) if err.kind() == ErrorKind::UnexpectedEof => {
+                    return Err(DecryptEncryptError::Closed)
                 }
+                // We got an unexpected error
                 Err(err) => return Err(DecryptEncryptError::Io(err)),
+                // The TLS session was closed cleanly
+                Ok(0) => return Err(DecryptEncryptError::Closed),
+                // We read some plaintext bytes
                 Ok(n) => plain_bytes.extend(&plain_bytes_chunk[0..n]),
             };
         }
@@ -312,8 +317,10 @@ fn encrypt(
 
 #[derive(Debug, Error)]
 enum DecryptEncryptError {
+    #[error("Session was closed")]
+    Closed,
     #[error(transparent)]
-    Io(#[from] tokio::io::Error),
+    Io(#[from] std::io::Error),
     #[error(transparent)]
     Tls(#[from] rustls::Error),
 }
@@ -321,6 +328,7 @@ enum DecryptEncryptError {
 impl<E> From<DecryptEncryptError> for Error<E> {
     fn from(value: DecryptEncryptError) -> Self {
         match value {
+            DecryptEncryptError::Closed => Error::Closed,
             DecryptEncryptError::Io(err) => Error::Io(err),
             DecryptEncryptError::Tls(err) => Error::Tls(err),
         }
