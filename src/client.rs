@@ -1,13 +1,13 @@
 use std::fmt::{Debug, Formatter};
 
 use imap_codec::{
+    imap_types::{
+        auth::AuthenticateData,
+        command::Command,
+        response::{CommandContinuationRequest, Data, Greeting, Response, Status},
+        secret::Secret,
+    },
     AuthenticateDataCodec, CommandCodec, GreetingCodec, IdleDoneCodec, ResponseCodec,
-};
-use imap_types::{
-    auth::AuthenticateData,
-    command::Command,
-    response::{CommandContinuationRequest, Data, Greeting, Response, Status},
-    secret::Secret,
 };
 use thiserror::Error;
 
@@ -299,7 +299,7 @@ pub enum Event {
         ///
         /// Note: [`Client`] already handled this [`Status`] but it might still have
         /// useful information that could be logged or displayed to the user
-        /// (e.g. [`Code::Alert`](imap_types::response::Code::Alert)).
+        /// (e.g. [`Code::Alert`](crate::imap_types::response::Code::Alert)).
         status: Status<'static>,
     },
     /// AUTHENTICATE sent.

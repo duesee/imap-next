@@ -1,9 +1,9 @@
 use imap_next::{
+    imap_types::response::{CommandContinuationRequest, Greeting, Status},
     server::{Event, Options, Server},
     stream::Stream,
     types::CommandAuthenticate,
 };
-use imap_types::response::{CommandContinuationRequest, Greeting, Status};
 use tokio::net::TcpListener;
 
 #[tokio::main(flavor = "current_thread")]

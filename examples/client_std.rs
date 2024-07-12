@@ -5,11 +5,11 @@ use std::{
 
 use imap_next::{
     client::{Client, Event, Options},
+    imap_types::{
+        command::{Command, CommandBody},
+        core::Tag,
+    },
     Interrupt, Io, State,
-};
-use imap_types::{
-    command::{Command, CommandBody},
-    core::Tag,
 };
 
 fn main() {

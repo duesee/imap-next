@@ -1,19 +1,19 @@
 use std::fmt::{Debug, Formatter};
 
 use imap_codec::{
-    AuthenticateDataCodec, CommandCodec, GreetingCodec, IdleDoneCodec, ResponseCodec,
-};
-use imap_types::{
-    auth::AuthenticateData,
-    command::{Command, CommandBody},
-    core::{LiteralMode, Tag, Text},
-    extensions::idle::IdleDone,
-    response::{
-        CommandContinuationRequest, CommandContinuationRequestBasic, Data, Greeting, Response,
-        Status,
+    imap_types::{
+        auth::AuthenticateData,
+        command::{Command, CommandBody},
+        core::{LiteralMode, Tag, Text},
+        extensions::idle::IdleDone,
+        response::{
+            CommandContinuationRequest, CommandContinuationRequestBasic, Data, Greeting, Response,
+            Status,
+        },
+        secret::Secret,
+        ToStatic,
     },
-    secret::Secret,
-    ToStatic,
+    AuthenticateDataCodec, CommandCodec, GreetingCodec, IdleDoneCodec, ResponseCodec,
 };
 use thiserror::Error;
 

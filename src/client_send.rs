@@ -2,14 +2,14 @@ use std::{collections::VecDeque, convert::Infallible};
 
 use imap_codec::{
     encode::{Encoder, Fragment},
+    imap_types::{
+        auth::AuthenticateData,
+        command::{Command, CommandBody},
+        core::{LiteralMode, Tag},
+        extensions::idle::IdleDone,
+        response::{Status, StatusBody, StatusKind, Tagged},
+    },
     AuthenticateDataCodec, CommandCodec, IdleDoneCodec,
-};
-use imap_types::{
-    auth::AuthenticateData,
-    command::{Command, CommandBody},
-    core::{LiteralMode, Tag},
-    extensions::idle::IdleDone,
-    response::{Status, StatusBody, StatusKind, Tagged},
 };
 use tracing::warn;
 

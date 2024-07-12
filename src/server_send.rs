@@ -2,9 +2,9 @@ use std::{collections::VecDeque, convert::Infallible};
 
 use imap_codec::{
     encode::{Encoded, Encoder, Fragment},
+    imap_types::response::{Greeting, Response},
     GreetingCodec, ResponseCodec,
 };
-use imap_types::response::{Greeting, Response};
 
 use crate::{server::ResponseHandle, Interrupt, Io};
 

@@ -45,11 +45,11 @@ And it's sans I/O enabling the integration in any existing I/O runtime.
 use std::error::Error;
 use imap_next::{
     client::{Client, Event, Options},
+    imap_types::{
+        command::{Command, CommandBody},
+        core::Tag,
+    },
     stream::Stream,
-};
-use imap_types::{
-    command::{Command, CommandBody},
-    core::Tag,
 };
 use tokio::net::TcpStream;
 

@@ -1,8 +1,10 @@
-use imap_codec::decode::Decoder;
-use imap_types::{
-    core::{LiteralMode, Tag},
-    secret::Secret,
-    IntoStatic,
+use imap_codec::{
+    decode::Decoder,
+    imap_types::{
+        core::{LiteralMode, Tag},
+        secret::Secret,
+        IntoStatic,
+    },
 };
 
 use crate::{
