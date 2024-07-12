@@ -43,18 +43,12 @@ impl ServerTester {
                     server::Event::GreetingSent { greeting } => {
                         assert_eq!(enqueued_greeting, greeting);
                     }
-                    event => {
-                        panic!("Server has unexpected event: {event:?}");
-                    }
+                    event => panic!("Server emitted unexpected event: {event:?}"),
                 }
                 self.connection_state = ConnectionState::Greeted { stream, server };
             }
-            ConnectionState::Greeted { .. } => {
-                panic!("Server has already greeted");
-            }
-            ConnectionState::Disconnected => {
-                panic!("Server is already disconnected");
-            }
+            ConnectionState::Greeted { .. } => panic!("Server has already greeted"),
+            ConnectionState::Disconnected => panic!("Server is already disconnected"),
         }
     }
 
@@ -140,9 +134,7 @@ impl ServerTester {
                 assert_eq!(enqueued_response.handle, handle);
                 assert_eq!(enqueued_response.response, response);
             }
-            event => {
-                panic!("Server has unexpected event: {event:?}");
-            }
+            event => panic!("Server emitted unexpected event: {event:?}"),
         }
     }
 
@@ -150,7 +142,7 @@ impl ServerTester {
     pub async fn progress_internal_responses<T>(&mut self) -> T {
         let (stream, server) = self.connection_state.greeted();
         let result = stream.next(server).await;
-        panic!("Server has unexpected result: {result:?}");
+        panic!("Server emitted unexpected result: {result:?}");
     }
 
     pub async fn send_data(&mut self, bytes: &[u8]) {
@@ -183,76 +175,75 @@ impl ServerTester {
         self.progress_response(enqueued_response).await;
     }
 
-    async fn receive_error(&mut self) -> server::Error {
+    async fn receive_error(&mut self) -> stream::Error<server::Error> {
         let (stream, server) = self.connection_state.greeted();
-        let error = stream.next(server).await.unwrap_err();
-        match error {
-            stream::Error::State(err) => err,
-            err => {
-                panic!("Server emitted unexpected error: {err:?}");
-            }
+        let result = stream.next(server).await;
+        match result {
+            Ok(event) => panic!("Server emitted unexpected event: {event:?}"),
+            Err(err) => err,
         }
     }
 
     pub async fn receive_error_because_expected_crlf_got_lf(&mut self, expected_bytes: &[u8]) {
         let error = self.receive_error().await;
         match error {
-            server::Error::ExpectedCrlfGotLf { discarded_bytes } => {
+            stream::Error::State(server::Error::ExpectedCrlfGotLf { discarded_bytes }) => {
                 assert_eq!(
                     expected_bytes.as_bstr(),
                     discarded_bytes.declassify().as_bstr()
                 );
             }
-            error => {
-                panic!("Server has unexpected error: {error:?}");
-            }
+            error => panic!("Server emitted unexpected error: {error:?}"),
         }
     }
 
     pub async fn receive_error_because_malformed_message(&mut self, expected_bytes: &[u8]) {
         let error = self.receive_error().await;
         match error {
-            server::Error::MalformedMessage { discarded_bytes } => {
+            stream::Error::State(server::Error::MalformedMessage { discarded_bytes }) => {
                 assert_eq!(
                     expected_bytes.as_bstr(),
                     discarded_bytes.declassify().as_bstr()
                 );
             }
-            error => {
-                panic!("Server has unexpected error: {error:?}");
-            }
+            error => panic!("Server emitted unexpected error: {error:?}"),
         }
     }
 
     pub async fn receive_error_because_literal_too_long(&mut self, expected_bytes: &[u8]) {
         let error = self.receive_error().await;
         match error {
-            server::Error::LiteralTooLong { discarded_bytes } => {
+            stream::Error::State(server::Error::LiteralTooLong { discarded_bytes }) => {
                 assert_eq!(
                     expected_bytes.as_bstr(),
                     discarded_bytes.declassify().as_bstr()
                 );
             }
-            error => {
-                panic!("Server has unexpected error: {error:?}");
-            }
+            error => panic!("Server emitted unexpected error: {error:?}"),
         }
     }
 
     pub async fn receive_error_because_command_too_long(&mut self, expected_bytes: &[u8]) {
         let error = self.receive_error().await;
         match error {
-            server::Error::CommandTooLong { discarded_bytes } => {
+            stream::Error::State(server::Error::CommandTooLong { discarded_bytes }) => {
                 assert_eq!(
                     expected_bytes.as_bstr(),
                     discarded_bytes.declassify().as_bstr()
                 );
             }
-            error => {
-                panic!("Server has unexpected error: {error:?}");
-            }
+            error => panic!("Server emitted unexpected error: {error:?}"),
         }
     }
+
+    pub async fn receive_error_because_stream_closed(&mut self) {
+        let error = self.receive_error().await;
+        match error {
+            stream::Error::Closed => (),
+            error => panic!("Server emitted unexpected error: {error:?}"),
+        }
+    }
+
     pub async fn receive_command(&mut self, expected_bytes: &[u8]) {
         let expected_command = self.codecs.decode_command(expected_bytes);
         let (stream, server) = self.connection_state.greeted();
@@ -261,9 +252,7 @@ impl ServerTester {
             server::Event::CommandReceived { command } => {
                 assert_eq!(expected_command, command);
             }
-            event => {
-                panic!("Server emitted unexpected event: {event:?}");
-            }
+            event => panic!("Server emitted unexpected event: {event:?}"),
         }
     }
 
@@ -275,9 +264,7 @@ impl ServerTester {
             server::Event::IdleCommandReceived { tag } => {
                 assert_eq!(expected_command.tag, tag);
             }
-            event => {
-                panic!("Server emitted unexpected event: {event:?}");
-            }
+            event => panic!("Server emitted unexpected event: {event:?}"),
         }
     }
 
@@ -286,9 +273,7 @@ impl ServerTester {
         let event = stream.next(server).await.unwrap();
         match event {
             server::Event::IdleDoneReceived => (),
-            event => {
-                panic!("Server emitted unexpected event: {event:?}");
-            }
+            event => panic!("Server emitted unexpected event: {event:?}"),
         }
     }
 
@@ -302,9 +287,7 @@ impl ServerTester {
             } => {
                 assert_eq!(expected_command, command_authenticate.into());
             }
-            event => {
-                panic!("Server emitted unexpected event: {event:?}");
-            }
+            event => panic!("Server emitted unexpected event: {event:?}"),
         }
     }
 
@@ -316,9 +299,7 @@ impl ServerTester {
             server::Event::AuthenticateDataReceived { authenticate_data } => {
                 assert_eq!(expected_authenticate_data, authenticate_data);
             }
-            event => {
-                panic!("Server emitted unexpected event: {event:?}");
-            }
+            event => panic!("Server emitted unexpected event: {event:?}"),
         }
     }
 }
@@ -337,13 +318,9 @@ enum ConnectionState {
 impl ConnectionState {
     fn greeted(&mut self) -> (&mut Stream, &mut Server) {
         match self {
-            ConnectionState::Connected { .. } => {
-                panic!("Server has not greeted yet");
-            }
+            ConnectionState::Connected { .. } => panic!("Server has not greeted yet"),
             ConnectionState::Greeted { stream, server } => (stream, server),
-            ConnectionState::Disconnected => {
-                panic!("Server is already disconnected");
-            }
+            ConnectionState::Disconnected => panic!("Server is already disconnected"),
         }
     }
 

@@ -431,3 +431,16 @@ fn authenticate_with_more_data_rejected() {
     let status = b"A2 OK ...\r\n";
     rt.run2(server.send(status), client.receive_status(status));
 }
+
+#[test]
+fn stream_closed() {
+    let (rt, mut server, mut client) = TestSetup::default().setup_client();
+
+    let greeting = b"* OK ...\r\n";
+    rt.run2(server.send(greeting), client.receive_greeting(greeting));
+
+    // Close stream
+    drop(server);
+
+    rt.run(client.receive_error_because_stream_closed());
+}
