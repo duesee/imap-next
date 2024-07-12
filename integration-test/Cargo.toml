@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 bstr = { version = "1.9.1", default-features = false }
 bytes = "1.6.0"
-imap-codec = { version = "2.0.0-alpha.1", git = "https://github.com/duesee/imap-codec", rev = "6bd83aff18fc12bad2b45c9fc50506b0c26ae2f6" }
+imap-codec = { version = "2.0.0-alpha.2" }
 imap-next = { path = ".." }
 tokio = { version = "1.38.0", features = ["macros", "net", "rt", "time"] }
 tracing = "0.1.40"

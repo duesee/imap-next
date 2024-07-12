@@ -2,8 +2,6 @@
 
 pub mod client;
 mod client_send;
-#[doc(hidden)] // TODO(#238): move to imap-codec and make it public
-pub mod fragmentizer;
 mod handle;
 mod receive;
 pub mod server;

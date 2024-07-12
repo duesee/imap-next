@@ -1,5 +1,9 @@
 use imap_codec::{
     decode::Decoder,
+    fragmentizer::{
+        DecodeMessageError, FragmentInfo, Fragmentizer, LineEnding, LiteralAnnouncement,
+        MaxMessageSize,
+    },
     imap_types::{
         core::{LiteralMode, Tag},
         secret::Secret,
@@ -7,13 +11,7 @@ use imap_codec::{
     },
 };
 
-use crate::{
-    fragmentizer::{
-        DecodeMessageError, FragmentInfo, Fragmentizer, LineEnding, LiteralAnnouncement,
-        MaxMessageSize,
-    },
-    Interrupt, Io,
-};
+use crate::{Interrupt, Io};
 
 pub struct ReceiveState {
     crlf_relaxed: bool,
