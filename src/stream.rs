@@ -5,7 +5,7 @@ use std::{
 
 use bytes::{Buf, BufMut, BytesMut};
 #[cfg(debug_assertions)]
-use imap_types::utils::escape_byte_string;
+use imap_codec::imap_types::utils::escape_byte_string;
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},

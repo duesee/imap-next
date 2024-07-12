@@ -365,7 +365,6 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "imap-codec",
- "imap-types",
  "rand",
  "rustls",
  "tag-generator",
@@ -405,7 +404,6 @@ dependencies = [
  "bytes",
  "imap-codec",
  "imap-next",
- "imap-types",
  "lazy_static",
  "tokio",
  "tracing",
@@ -662,7 +660,6 @@ dependencies = [
  "colored",
  "imap-codec",
  "imap-next",
- "imap-types",
  "once_cell",
  "rustls-native-certs",
  "rustls-pemfile",

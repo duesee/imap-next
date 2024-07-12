@@ -3,7 +3,7 @@ use imap_codec::{
     decode::Decoder, encode::Encoder, AuthenticateDataCodec, CommandCodec, GreetingCodec,
     ResponseCodec,
 };
-use imap_types::{
+use imap_next::imap_types::{
     auth::AuthenticateData,
     command::Command,
     response::{CommandContinuationRequest, Data, Greeting, Response, Status},

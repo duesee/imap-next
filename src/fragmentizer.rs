@@ -2,10 +2,12 @@
 
 use std::{collections::VecDeque, ops::Range};
 
-use imap_codec::decode::Decoder;
-use imap_types::{
-    core::{LiteralMode, Tag},
-    secret::Secret,
+use imap_codec::{
+    decode::Decoder,
+    imap_types::{
+        core::{LiteralMode, Tag},
+        secret::Secret,
+    },
 };
 
 /// Limits the size of messages that can be decoded by [`Fragmentizer`].
@@ -548,11 +550,14 @@ mod tests {
     use core::panic;
     use std::collections::VecDeque;
 
-    use imap_codec::{decode::ResponseDecodeError, CommandCodec, ResponseCodec};
-    use imap_types::{
-        command::{Command, CommandBody},
-        core::{LiteralMode, Tag},
-        secret::Secret,
+    use imap_codec::{
+        decode::ResponseDecodeError,
+        imap_types::{
+            command::{Command, CommandBody},
+            core::{LiteralMode, Tag},
+            secret::Secret,
+        },
+        CommandCodec, ResponseCodec,
     };
 
     use super::{

@@ -3,7 +3,7 @@
 
 use std::borrow::Cow;
 
-use imap_types::{
+use imap_codec::imap_types::{
     auth::AuthMechanism,
     command::{Command, CommandBody},
     core::Tag,

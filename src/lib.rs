@@ -14,6 +14,9 @@ pub mod stream;
 mod tests;
 pub mod types;
 
+// Re-export(s)
+pub use imap_codec::imap_types;
+
 // Test examples from imap-next's README.
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]

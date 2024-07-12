@@ -1,6 +1,6 @@
 use std::{fs::File, io::BufReader, path::Path};
 
-use imap_types::{
+use imap_next::imap_types::{
     auth::AuthMechanism,
     core::Vec1,
     response::{

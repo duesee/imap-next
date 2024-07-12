@@ -2,12 +2,12 @@ use std::io::BufRead;
 
 use imap_next::{
     client::{Client, Event, Options},
+    imap_types::{
+        command::{Command, CommandBody},
+        core::Tag,
+        response::{Status, Tagged},
+    },
     stream::Stream,
-};
-use imap_types::{
-    command::{Command, CommandBody},
-    core::Tag,
-    response::{Status, Tagged},
 };
 use tokio::{net::TcpStream, sync::mpsc::Receiver};
 

@@ -2,11 +2,11 @@ use std::collections::VecDeque;
 
 use imap_next::{
     client::{Client, Event, Options},
+    imap_types::{
+        auth::{AuthMechanism, AuthenticateData},
+        command::{Command, CommandBody},
+    },
     stream::Stream,
-};
-use imap_types::{
-    auth::{AuthMechanism, AuthenticateData},
-    command::{Command, CommandBody},
 };
 use tag_generator::TagGenerator;
 use tokio::net::TcpStream;

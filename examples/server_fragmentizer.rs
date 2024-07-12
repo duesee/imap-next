@@ -1,8 +1,10 @@
 use std::{io::Read, net::TcpListener};
 
 use imap_codec::{AuthenticateDataCodec, CommandCodec, IdleDoneCodec};
-use imap_next::fragmentizer::{Fragmentizer, MaxMessageSize};
-use imap_types::command::CommandBody;
+use imap_next::{
+    fragmentizer::{Fragmentizer, MaxMessageSize},
+    imap_types::command::CommandBody,
+};
 
 enum State {
     Command,

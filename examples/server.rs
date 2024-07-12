@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 
 use imap_next::{
+    imap_types::response::{Greeting, Status},
     server::{Event, Options, Server},
     stream::Stream,
 };
-use imap_types::response::{Greeting, Status};
 use tokio::net::TcpListener;
 
 #[tokio::main(flavor = "current_thread")]

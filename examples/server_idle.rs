@@ -1,14 +1,14 @@
 use std::{io::BufRead, num::NonZeroU32};
 
 use imap_next::{
+    imap_types::{
+        core::Text,
+        response::{
+            CommandContinuationRequest, Data, Greeting, Status, StatusBody, StatusKind, Tagged,
+        },
+    },
     server::{Event, Options, Server},
     stream::Stream,
-};
-use imap_types::{
-    core::Text,
-    response::{
-        CommandContinuationRequest, Data, Greeting, Status, StatusBody, StatusKind, Tagged,
-    },
 };
 use tokio::{net::TcpListener, sync::mpsc::Receiver};
 

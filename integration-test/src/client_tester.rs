@@ -3,9 +3,9 @@ use std::net::SocketAddr;
 use bstr::ByteSlice;
 use imap_next::{
     client::{self, Client, CommandHandle},
+    imap_types::{command::Command, ToStatic},
     stream::{self, Stream},
 };
-use imap_types::{command::Command, ToStatic};
 use tokio::net::TcpStream;
 use tracing::trace;
 
