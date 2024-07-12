@@ -3,14 +3,14 @@ use std::{net::SocketAddr, sync::Arc};
 use colored::Colorize;
 use imap_next::{
     client::{self, Client},
+    imap_types::{
+        command::{Command, CommandBody},
+        extensions::idle::IdleDone,
+        response::{Code, Status},
+        ToStatic,
+    },
     server::{self, Server},
     stream::{self, Stream},
-};
-use imap_types::{
-    command::{Command, CommandBody},
-    extensions::idle::IdleDone,
-    response::{Code, Status},
-    ToStatic,
 };
 use once_cell::sync::Lazy;
 use thiserror::Error;

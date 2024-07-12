@@ -1,9 +1,9 @@
 use bstr::ByteSlice;
 use imap_next::{
+    imap_types::{response::Response, ToStatic},
     server::{self, ResponseHandle, Server},
     stream::{self, Stream},
 };
-use imap_types::{response::Response, ToStatic};
 use tokio::net::TcpListener;
 use tracing::trace;
 
