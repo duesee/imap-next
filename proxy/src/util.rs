@@ -12,11 +12,6 @@ use thiserror::Error;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tracing::warn;
 
-pub enum ControlFlow {
-    Continue,
-    Abort,
-}
-
 /// Remove unsupported capabilities in a greetings `Code::Capability`.
 pub fn filter_capabilities_in_greeting(greeting: &mut Greeting) {
     if let Some(Code::Capability(capabilities)) = &mut greeting.code {

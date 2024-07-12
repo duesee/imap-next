@@ -6,7 +6,7 @@ use imap_next::{
     imap_types::{
         command::{Command, CommandBody},
         extensions::idle::IdleDone,
-        response::{Code, Status},
+        response::{Code, Greeting, Status},
         ToStatic,
     },
     server::{self, Server},
@@ -23,7 +23,7 @@ use tracing::{error, info, trace};
 
 use crate::{
     config::{Bind, Connect, Identity, Service},
-    util::{self, ControlFlow, IdentityError},
+    util::{self, IdentityError},
 };
 
 static ROOT_CERT_STORE: Lazy<RootCertStore> = Lazy::new(|| {
@@ -110,6 +110,7 @@ impl Proxy<BoundState> {
                 //             However, for testing purposes, it's nice to create it on-the-fly.
                 let acceptor = TlsAcceptor::from(Arc::new(config));
 
+                info!(?client_addr, "Starting TLS with client");
                 Stream::tls(acceptor.accept(client_to_proxy).await?.into())
             }
             Bind::Insecure { .. } => Stream::insecure(client_to_proxy),
@@ -139,8 +140,9 @@ impl Proxy<ClientAcceptedState> {
 
     pub async fn connect_to_server(self) -> Result<Proxy<ConnectedState>, ProxyError> {
         let server_addr_port = self.service.connect.addr_port();
-        info!(%server_addr_port, "Connecting to server");
+        info!(?server_addr_port, "Connecting to server");
         let stream_to_server = TcpStream::connect(&server_addr_port).await?;
+        info!(?server_addr_port, "Connected to server");
 
         let proxy_to_server = match self.service.connect {
             Connect::Tls { ref host, .. } => {
@@ -163,8 +165,6 @@ impl Proxy<ClientAcceptedState> {
             }
             Connect::Insecure { .. } => Stream::insecure(stream_to_server),
         };
-
-        info!(?server_addr_port, "Connected to server");
 
         Ok(Proxy {
             service: self.service,
@@ -191,18 +191,13 @@ impl Proxy<ConnectedState> {
             Client::new(options)
         };
         let mut proxy_to_server_stream = self.state.proxy_to_server;
-        let mut greeting = match proxy_to_server_stream.next(&mut proxy_to_server).await {
-            Ok(client::Event::GreetingReceived { greeting }) => greeting,
-            Ok(event) => {
-                error!(role = "s2p", ?event, "Unexpected event");
-                return;
-            }
-            Err(error) => {
-                error!(role = "s2p", ?error, "Failed to receive greeting");
-                return;
-            }
+        let stream_event = proxy_to_server_stream.next(&mut proxy_to_server).await;
+        let Some(server_event) = handle_stream_event("s2p", stream_event) else {
+            return;
         };
-        trace!(role = "s2p", greeting=%format!("{:?}", greeting).blue(), "<--|");
+        let Some(mut greeting) = handle_initial_server_event(server_event) else {
+            return;
+        };
 
         util::filter_capabilities_in_greeting(&mut greeting);
 
@@ -220,41 +215,72 @@ impl Proxy<ConnectedState> {
         let mut client_to_proxy_stream = self.state.client_to_proxy;
 
         loop {
-            let control_flow = tokio::select! {
-                event = client_to_proxy_stream.next(&mut client_to_proxy) => {
-                    handle_client_event(event, &mut proxy_to_server)
+            tokio::select! {
+                stream_event = client_to_proxy_stream.next(&mut client_to_proxy) => {
+                    let Some(client_event) = handle_stream_event("c2p", stream_event) else {
+                        break;
+                    };
+                    handle_client_event(client_event, &mut proxy_to_server)
                 }
-                event = proxy_to_server_stream.next(&mut proxy_to_server) => {
-                    handle_server_event(event, &mut client_to_proxy)
+                stream_event = proxy_to_server_stream.next(&mut proxy_to_server) => {
+                    let Some(server_event) = handle_stream_event("s2p", stream_event) else {
+                        break;
+                    };
+                    handle_server_event(server_event, &mut client_to_proxy)
                 }
             };
+        }
+    }
+}
 
-            if let ControlFlow::Abort = control_flow {
-                break;
-            }
+fn handle_stream_event<T, E>(
+    role: &'static str,
+    stream_event: Result<T, stream::Error<E>>,
+) -> Option<Result<T, E>> {
+    match stream_event {
+        Ok(event) => Some(Ok(event)),
+        Err(stream::Error::Closed) => {
+            info!(role, "Connection closed");
+            None
+        }
+        Err(stream::Error::Io(error)) => {
+            error!(role, %error, "Connection terminated");
+            None
+        }
+        Err(stream::Error::Tls(error)) => {
+            error!(role, %error, "Connection terminated");
+            None
+        }
+        Err(stream::Error::State(error)) => Some(Err(error)),
+    }
+}
+
+fn handle_initial_server_event(
+    server_event: Result<client::Event, client::Error>,
+) -> Option<Greeting<'static>> {
+    match server_event {
+        Ok(client::Event::GreetingReceived { greeting }) => {
+            trace!(role = "s2p", greeting=%format!("{:?}", greeting).blue(), "<--|");
+            Some(greeting)
+        }
+        Ok(event) => {
+            error!(role = "s2p", ?event, "Unexpected event instead of greeting");
+            None
+        }
+        Err(error) => {
+            error!(role = "s2p", ?error, "Failed to receive greeting");
+            None
         }
     }
 }
 
 fn handle_client_event(
-    result: Result<server::Event, stream::Error<server::Error>>,
+    client_event: Result<server::Event, server::Error>,
     proxy_to_server: &mut Client,
-) -> ControlFlow {
-    let event = match result {
+) {
+    let event = match client_event {
         Ok(event) => event,
-        Err(stream::Error::Closed) => {
-            info!(role = "c2p", "Connection closed");
-            return ControlFlow::Abort;
-        }
-        Err(stream::Error::Io(error)) => {
-            error!(role = "c2p", %error, "Connection terminated");
-            return ControlFlow::Abort;
-        }
-        Err(stream::Error::Tls(error)) => {
-            error!(role = "c2p", %error, "Connection terminated");
-            return ControlFlow::Abort;
-        }
-        Err(stream::Error::State(
+        Err(
             ref error @ (server::Error::ExpectedCrlfGotLf {
                 ref discarded_bytes,
             }
@@ -267,9 +293,9 @@ fn handle_client_event(
             | server::Error::CommandTooLong {
                 ref discarded_bytes,
             }),
-        )) => {
+        ) => {
             error!(role = "c2p", %error, ?discarded_bytes, "Discard client message");
-            return ControlFlow::Continue;
+            return;
         }
     };
 
@@ -291,13 +317,21 @@ fn handle_client_event(
         } => {
             let command_authenticate: Command<'static> = command_authenticate.into();
 
-            trace!(role = "c2p", command_authenticate=%format!("{:?}", command_authenticate).red(), "|-->");
+            trace!(
+                role = "c2p",
+                command_authenticate=%format!("{:?}", command_authenticate).red(),
+                "|-->"
+            );
 
             let handle = proxy_to_server.enqueue_command(command_authenticate);
             trace!(role = "p2s", ?handle, "enqueue_command");
         }
         server::Event::AuthenticateDataReceived { authenticate_data } => {
-            trace!(role = "c2p", authenticate_data=%format!("{:?}", authenticate_data).red(), "|-->");
+            trace!(
+                role = "c2p",
+                authenticate_data=%format!("{:?}", authenticate_data).red(),
+                "|-->"
+            );
 
             // TODO(#145): Fix unwrap
             let handle = proxy_to_server
@@ -323,38 +357,24 @@ fn handle_client_event(
             trace!(role = "p2s", ?handle, "set_idle_done");
         }
     }
-
-    ControlFlow::Continue
 }
 
 fn handle_server_event(
-    event: Result<client::Event, stream::Error<client::Error>>,
+    server_event: Result<client::Event, client::Error>,
     client_to_proxy: &mut Server,
-) -> ControlFlow {
-    let event = match event {
+) {
+    let event = match server_event {
         Ok(event) => event,
-        Err(stream::Error::Closed) => {
-            error!(role = "s2p", "Connection closed");
-            return ControlFlow::Abort;
-        }
-        Err(stream::Error::Io(error)) => {
-            error!(role = "s2p", %error, "Connection terminated");
-            return ControlFlow::Abort;
-        }
-        Err(stream::Error::Tls(error)) => {
-            error!(role = "s2p", %error, "Connection terminated");
-            return ControlFlow::Abort;
-        }
-        Err(stream::Error::State(
+        Err(
             ref error @ (client::Error::ExpectedCrlfGotLf {
                 ref discarded_bytes,
             }
             | client::Error::MalformedMessage {
                 ref discarded_bytes,
             }),
-        )) => {
-            error!(role = "c2p", %error, ?discarded_bytes, "Discard server message");
-            return ControlFlow::Continue;
+        ) => {
+            error!(role = "s2p", %error, ?discarded_bytes, "Discard server message");
+            return;
         }
     };
 
@@ -390,7 +410,12 @@ fn handle_server_event(
                 }
             };
             let handle = client_to_proxy.enqueue_status(modified_status.clone());
-            trace!(role = "p2c", ?handle, modified_status=%format!("{:?}", modified_status).yellow(), "enqueue_status");
+            trace!(
+                role = "p2c",
+                ?handle,
+                modified_status=%format!("{:?}", modified_status).yellow(),
+                "enqueue_status"
+            );
         }
         client::Event::AuthenticateStarted { handle } => {
             trace!(role = "p2s", ?handle, "--->");
@@ -399,7 +424,11 @@ fn handle_server_event(
             continuation_request,
             ..
         } => {
-            trace!(role = "s2p", authenticate_continuation_request=%format!("{:?}", continuation_request).blue(), "<--|");
+            trace!(
+                role = "s2p",
+                authenticate_continuation_request=%format!("{:?}", continuation_request).blue(),
+                "<--|"
+            );
 
             let handle = client_to_proxy
                 .authenticate_continue(continuation_request)
@@ -432,7 +461,11 @@ fn handle_server_event(
         client::Event::ContinuationRequestReceived {
             mut continuation_request,
         } => {
-            trace!(role = "s2p", continuation_request=%format!("{:?}", continuation_request).blue(), "<--|");
+            trace!(
+                role = "s2p",
+                continuation_request=%format!("{:?}", continuation_request).blue(),
+                "<--|"
+            );
 
             util::filter_capabilities_in_continuation(&mut continuation_request);
 
@@ -458,16 +491,19 @@ fn handle_server_event(
             trace!(role = "p2c", ?handle, "idle_accept");
         }
         client::Event::IdleRejected { handle, status } => {
-            trace!(role = "s2p", ?handle, idle_rejected_status=%format!("{:?}", status).blue(), "<--|");
+            trace!(
+                role = "s2p",
+                ?handle,
+                idle_rejected_status=%format!("{:?}", status).blue(),
+                "<--|"
+            );
 
             // TODO(#145): Fix unwrap
             let handle = client_to_proxy.idle_reject(status).unwrap();
             trace!(role = "p2c", ?handle, "idle_reject");
         }
         client::Event::IdleDoneSent { handle } => {
-            trace!(role = "p2c", ?handle, "--->");
+            trace!(role = "p2s", ?handle, "--->");
         }
     }
-
-    ControlFlow::Continue
 }
