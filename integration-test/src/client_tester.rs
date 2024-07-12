@@ -41,9 +41,7 @@ impl ClientTester {
             client::Event::GreetingReceived { greeting } => {
                 assert_eq!(expected_greeting, greeting);
             }
-            event => {
-                panic!("Client emitted unexpected event: {event:?}");
-            }
+            event => panic!("Client emitted unexpected event: {event:?}"),
         }
     }
 
@@ -82,9 +80,7 @@ impl ClientTester {
                 assert_eq!(enqueued_command.handle, handle);
                 assert_eq!(enqueued_command.command, command);
             }
-            event => {
-                panic!("Client emitted unexpected event: {event:?}");
-            }
+            event => panic!("Client emitted unexpected event: {event:?}"),
         }
     }
 
@@ -95,9 +91,7 @@ impl ClientTester {
             client::Event::IdleCommandSent { handle } => {
                 assert_eq!(idle_handle, handle);
             }
-            event => {
-                panic!("Client emitted unexpected event: {event:?}");
-            }
+            event => panic!("Client emitted unexpected event: {event:?}"),
         }
     }
 
@@ -108,9 +102,7 @@ impl ClientTester {
             client::Event::IdleDoneSent { handle } => {
                 assert_eq!(idle_handle, handle);
             }
-            event => {
-                panic!("Client emitted unexpected event: {event:?}");
-            }
+            event => panic!("Client emitted unexpected event: {event:?}"),
         }
     }
 
@@ -121,9 +113,7 @@ impl ClientTester {
             client::Event::AuthenticateStarted { handle } => {
                 assert_eq!(authenticate_handle, handle);
             }
-            event => {
-                panic!("Client emitted unexpected event: {event:?}");
-            }
+            event => panic!("Client emitted unexpected event: {event:?}"),
         }
     }
 
@@ -145,9 +135,7 @@ impl ClientTester {
                 assert_eq!(enqueued_command.command, command);
                 assert_eq!(expected_status, status);
             }
-            event => {
-                panic!("Client emitted unexpected event: {event:?}");
-            }
+            event => panic!("Client emitted unexpected event: {event:?}"),
         }
     }
 
@@ -155,7 +143,7 @@ impl ClientTester {
     pub async fn progress_internal_commands<T>(&mut self) -> T {
         let (stream, client) = self.connection_state.connected();
         let result = stream.next(client).await;
-        panic!("Client has unexpected result: {result:?}");
+        panic!("Client emitted unexpected result: {result:?}");
     }
 
     pub async fn send_command(&mut self, bytes: &[u8]) {
@@ -194,9 +182,7 @@ impl ClientTester {
             client::Event::DataReceived { data } => {
                 assert_eq!(expected_data, data);
             }
-            event => {
-                panic!("Client emitted unexpected event: {event:?}");
-            }
+            event => panic!("Client emitted unexpected event: {event:?}"),
         }
     }
 
@@ -208,9 +194,7 @@ impl ClientTester {
             client::Event::StatusReceived { status } => {
                 assert_eq!(expected_status, status);
             }
-            event => {
-                panic!("Client emitted unexpected event: {event:?}");
-            }
+            event => panic!("Client emitted unexpected event: {event:?}"),
         }
     }
 
@@ -230,9 +214,7 @@ impl ClientTester {
                 assert_eq!(handle, idle_handle);
                 assert_eq!(expected_continuation_request, continuation_request);
             }
-            event => {
-                panic!("Client emitted unexpected event: {event:?}");
-            }
+            event => panic!("Client emitted unexpected event: {event:?}"),
         }
     }
 
@@ -249,9 +231,7 @@ impl ClientTester {
                 assert_eq!(handle, idle_handle);
                 assert_eq!(status, expected_status);
             }
-            event => {
-                panic!("Client emitted unexpected event: {event:?}");
-            }
+            event => panic!("Client emitted unexpected event: {event:?}"),
         }
     }
 
@@ -271,9 +251,7 @@ impl ClientTester {
                 assert_eq!(handle, authenticate_request);
                 assert_eq!(expected_continuation_request, continuation_request);
             }
-            event => {
-                panic!("Client emitted unexpected event: {event:?}");
-            }
+            event => panic!("Client emitted unexpected event: {event:?}"),
         }
     }
 
@@ -299,55 +277,52 @@ impl ClientTester {
                 assert_eq!(expected_command, command_authenticate.into());
                 assert_eq!(expected_status, status);
             }
-            event => {
-                panic!("Client emitted unexpected event: {event:?}");
-            }
+            event => panic!("Client emitted unexpected event: {event:?}"),
         }
     }
 
-    async fn receive_error(&mut self) -> client::Error {
-        let error = match &mut self.connection_state {
-            ConnectionState::Connected { stream, client } => stream.next(client).await.unwrap_err(),
-            ConnectionState::Disconnected => {
-                panic!("Client is already disconnected")
-            }
+    async fn receive_error(&mut self) -> stream::Error<client::Error> {
+        let result = match &mut self.connection_state {
+            ConnectionState::Connected { stream, client } => stream.next(client).await,
+            ConnectionState::Disconnected => panic!("Client is already disconnected"),
         };
-
-        match error {
-            stream::Error::State(err) => err,
-            err => {
-                panic!("Client emitted unexpected error: {err:?}");
-            }
+        match result {
+            Ok(event) => panic!("Client emitted unexpected event: {event:?}"),
+            Err(err) => err,
         }
     }
 
     pub async fn receive_error_because_expected_crlf_got_lf(&mut self, expected_bytes: &[u8]) {
         let error = self.receive_error().await;
         match error {
-            client::Error::ExpectedCrlfGotLf { discarded_bytes } => {
+            stream::Error::State(client::Error::ExpectedCrlfGotLf { discarded_bytes }) => {
                 assert_eq!(
                     expected_bytes.as_bstr(),
                     discarded_bytes.declassify().as_bstr()
                 );
             }
-            error => {
-                panic!("Client emitted unexpected error: {error:?}");
-            }
+            error => panic!("Client emitted unexpected error: {error:?}"),
         }
     }
 
     pub async fn receive_error_because_malformed_message(&mut self, expected_bytes: &[u8]) {
         let error = self.receive_error().await;
         match error {
-            client::Error::MalformedMessage { discarded_bytes } => {
+            stream::Error::State(client::Error::MalformedMessage { discarded_bytes }) => {
                 assert_eq!(
                     expected_bytes.as_bstr(),
                     discarded_bytes.declassify().as_bstr()
                 );
             }
-            error => {
-                panic!("Client emitted unexpected error: {error:?}");
-            }
+            error => panic!("Client emitted unexpected error: {error:?}"),
+        }
+    }
+
+    pub async fn receive_error_because_stream_closed(&mut self) {
+        let error = self.receive_error().await;
+        match error {
+            stream::Error::Closed => (),
+            error => panic!("Client emitted unexpected error: {error:?}"),
         }
     }
 }
@@ -365,9 +340,7 @@ impl ConnectionState {
     fn connected(&mut self) -> (&mut Stream, &mut Client) {
         match self {
             ConnectionState::Connected { stream, client } => (stream, client),
-            ConnectionState::Disconnected => {
-                panic!("Client is already disconnected");
-            }
+            ConnectionState::Disconnected => panic!("Client is already disconnected"),
         }
     }
 
