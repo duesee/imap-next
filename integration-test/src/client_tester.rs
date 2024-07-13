@@ -318,6 +318,19 @@ impl ClientTester {
         }
     }
 
+    pub async fn receive_error_because_response_too_long(&mut self, expected_bytes: &[u8]) {
+        let error = self.receive_error().await;
+        match error {
+            stream::Error::State(client::Error::ResponseTooLong { discarded_bytes }) => {
+                assert_eq!(
+                    expected_bytes.as_bstr(),
+                    discarded_bytes.declassify().as_bstr()
+                );
+            }
+            error => panic!("Client emitted unexpected error: {error:?}"),
+        }
+    }
+
     pub async fn receive_error_because_stream_closed(&mut self) {
         let error = self.receive_error().await;
         match error {

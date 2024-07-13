@@ -371,6 +371,9 @@ fn handle_server_event(
             }
             | client::Error::MalformedMessage {
                 ref discarded_bytes,
+            }
+            | client::Error::ResponseTooLong {
+                ref discarded_bytes,
             }),
         ) => {
             error!(role = "s2p", %error, ?discarded_bytes, "Discard server message");
