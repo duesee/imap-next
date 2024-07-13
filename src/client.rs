@@ -26,6 +26,10 @@ static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<CommandHandle> =
 #[non_exhaustive]
 pub struct Options {
     pub crlf_relaxed: bool,
+    /// Max response size that can be parsed by the client.
+    ///
+    /// Bigger responses raise an error.
+    pub max_response_size: u32,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -34,6 +38,10 @@ impl Default for Options {
         Self {
             // Lean towards conformity
             crlf_relaxed: false,
+            // We use a value larger than the default `server::Options::max_command_size`
+            // because we assume that a client has usually less resource constraints than the
+            // server.
+            max_response_size: 100 * 1024 * 1024,
         }
     }
 }
@@ -53,7 +61,8 @@ impl Client {
             IdleDoneCodec::default(),
         );
 
-        let receive_state = ReceiveState::new(options.crlf_relaxed, None);
+        let receive_state =
+            ReceiveState::new(options.crlf_relaxed, Some(options.max_response_size));
         let next_expected_message = NextExpectedMessage::Greeting(GreetingCodec::default());
 
         Self {
@@ -247,9 +256,8 @@ fn handle_receive_interrupt(interrupt: Interrupt<ReceiveError>) -> Interrupt<Err
             // Unreachable because we don't poison messages
             unreachable!()
         }
-        Interrupt::Error(ReceiveError::MessageTooLong { .. }) => {
-            // Unreachable because message limit is not set
-            unreachable!()
+        Interrupt::Error(ReceiveError::MessageTooLong { discarded_bytes }) => {
+            Interrupt::Error(Error::ResponseTooLong { discarded_bytes })
         }
     }
 }
@@ -353,6 +361,8 @@ pub enum Error {
     ExpectedCrlfGotLf { discarded_bytes: Secret<Box<[u8]>> },
     #[error("Received malformed message")]
     MalformedMessage { discarded_bytes: Secret<Box<[u8]>> },
+    #[error("Response is too long")]
+    ResponseTooLong { discarded_bytes: Secret<Box<[u8]>> },
 }
 
 #[derive(Clone, Debug)]

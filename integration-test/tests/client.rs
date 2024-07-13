@@ -218,6 +218,45 @@ fn login_with_non_sync_literal() {
 }
 
 #[test]
+fn response_larger_than_max_response_size() {
+    // The client will reject the response because it's larger than the max size
+    let max_response_size_tests = [11, 20, 100, 10 * 1024 * 1024];
+
+    for max_response_size in max_response_size_tests {
+        let mut setup = TestSetup::default();
+        setup.client_options.max_response_size = max_response_size as u32;
+        // Sending large messages takes some time, especially when running on a slow CI.
+        setup.runtime_options.timeout = Some(Duration::from_secs(10));
+
+        let (rt, mut server, mut client) = setup.setup_client();
+
+        let greeting = b"* OK ...\r\n";
+        rt.run2(server.send(greeting), client.receive_greeting(greeting));
+
+        let noop = b"A1 NOOP\r\n";
+        rt.run2(client.send_command(noop), server.receive(noop));
+
+        // Response smaller than the max size can be received
+        let small_status = b"A1 OK ...\r\n";
+        rt.run2(
+            server.send(small_status),
+            client.receive_status(small_status),
+        );
+
+        // Response larger than the max size triggers an error
+        let large_status = format!(
+            "{}\r\n",
+            String::from_utf8(vec![b'.'; max_response_size + 1]).unwrap(),
+        )
+        .into_bytes();
+        rt.run2(
+            server.send(&large_status),
+            client.receive_error_because_response_too_long(&large_status[..max_response_size]),
+        );
+    }
+}
+
+#[test]
 fn idle_accepted() {
     let (rt, mut server, mut client) = TestSetup::default().setup_client();
 
