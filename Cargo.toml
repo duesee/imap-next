@@ -19,12 +19,26 @@ stream = ["dep:bytes", "dep:rustls", "dep:tokio", "dep:tokio-rustls"]
 
 [dependencies]
 bytes = { version = "1.6.0", optional = true }
-imap-codec = { version = "2.0.0-alpha.2", features = ["starttls", "quirk_crlf_relaxed", "ext_condstore_qresync", "ext_login_referrals", "ext_mailbox_referrals", "ext_id", "ext_sort_thread", "ext_binary", "ext_metadata", "ext_uidplus"] }
 rustls = { version = "0.23.11", optional = true }
 thiserror = "1.0.62"
 tokio = { version = "1.38.0", optional = true, features = ["io-util", "macros", "net"] }
 tokio-rustls = { version = "0.26.0", optional = true }
 tracing = "0.1.40"
+
+[dependencies.imap-codec]
+version = "2.0.0-alpha.2"
+features = [
+    "quirk_crlf_relaxed",
+    "starttls",
+    "ext_binary",
+    "ext_condstore_qresync",
+    "ext_id",
+    "ext_login_referrals",
+    "ext_mailbox_referrals",
+    "ext_metadata",
+    "ext_sort_thread",
+    "ext_uidplus",
+]
 
 [dev-dependencies]
 rand = "0.8.5"
