@@ -5,10 +5,10 @@ use imap_next::{
     imap_types::{
         auth::{AuthMechanism, AuthenticateData},
         command::{Command, CommandBody},
+        core::TagGenerator,
     },
     stream::Stream,
 };
-use tag_generator::TagGenerator;
 use tokio::net::TcpStream;
 
 #[tokio::main(flavor = "current_thread")]

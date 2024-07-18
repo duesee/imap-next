@@ -348,9 +348,9 @@ dependencies = [
 
 [[package]]
 name = "imap-codec"
-version = "2.0.0-alpha.2"
+version = "2.0.0-alpha.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f5b3f6b7f1c1dcba79867482c6fd94c0539b0115752397a7e7d0aff20f7e04d"
+checksum = "8223b81b583119c2178681cb1d7fff8485ee0b88bb26aaf06a9dee29b4579fed"
 dependencies = [
  "abnf-core",
  "base64",
@@ -366,9 +366,9 @@ version = "0.2.0"
 dependencies = [
  "bytes",
  "imap-codec",
+ "imap-types",
  "rand",
  "rustls",
- "tag-generator",
  "thiserror",
  "tokio",
  "tokio-rustls",
@@ -377,14 +377,15 @@ dependencies = [
 
 [[package]]
 name = "imap-types"
-version = "2.0.0-alpha.2"
+version = "2.0.0-alpha.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dafc29c11ece4433e74bf11b750cbd3135b0cf342975e29503503a1489cb00b"
+checksum = "20a1a5a918696bcc51132d4b96f9dd872517e70fcb7a7b8082f0edcd83a84eeb"
 dependencies = [
  "base64",
  "bounded-static",
  "bounded-static-derive",
  "chrono",
+ "rand",
  "thiserror",
 ]
 
@@ -990,14 +991,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "tag-generator"
-version = "0.1.0"
-dependencies = [
- "imap-types",
- "rand",
 ]
 
 [[package]]
