@@ -2,7 +2,6 @@ use imap_codec::{
     decode::Decoder,
     fragmentizer::{
         DecodeMessageError, FragmentInfo, Fragmentizer, LineEnding, LiteralAnnouncement,
-        MaxMessageSize,
     },
     imap_types::{
         core::{LiteralMode, Tag},
@@ -22,11 +21,14 @@ pub struct ReceiveState {
 
 impl ReceiveState {
     pub fn new(crlf_relaxed: bool, max_message_size: Option<u32>) -> Self {
-        let max_message_size =
-            max_message_size.map_or(MaxMessageSize::Unlimited, MaxMessageSize::Limited);
+        let fragmentizer = match max_message_size {
+            Some(max_message_size) => Fragmentizer::new(max_message_size),
+            None => Fragmentizer::without_max_message_size(),
+        };
+
         Self {
             crlf_relaxed,
-            fragmentizer: Fragmentizer::new(max_message_size),
+            fragmentizer,
             message_has_invalid_line_ending: false,
             message_is_poisoned: false,
         }

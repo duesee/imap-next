@@ -26,23 +26,20 @@ tokio-rustls = { version = "0.26.0", optional = true }
 tracing = "0.1.40"
 
 [dependencies.imap-codec]
-version = "2.0.0-alpha.2"
+version = "2.0.0-alpha.3"
 features = [
     "quirk_crlf_relaxed",
     "starttls",
-    "ext_binary",
-    "ext_condstore_qresync",
+    #"ext_condstore_qresync",
     "ext_id",
-    "ext_login_referrals",
-    "ext_mailbox_referrals",
+    #"ext_login_referrals",
+    #"ext_mailbox_referrals",
     "ext_metadata",
-    "ext_sort_thread",
-    "ext_uidplus",
 ]
 
 [dev-dependencies]
+imap-types = { version = "2.0.0-alpha.3", features = ["tag_generator"] }
 rand = "0.8.5"
-tag-generator = { path = "tag-generator" }
 tokio = { version = "1.38.0", features = ["full"] }
 
 [workspace]
@@ -50,5 +47,4 @@ resolver = "2"
 members = [
     "integration-test",
     "proxy",
-    "tag-generator",
 ]
