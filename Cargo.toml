@@ -14,28 +14,34 @@ default = ["stream"]
 expose_stream = []
 stream = ["dep:bytes", "dep:rustls", "dep:tokio", "dep:tokio-rustls"]
 
+# <Forward to imap-codec>
+arbitrary = ["imap-codec/arbitrary"]
+arbitrary_simplified = ["imap-codec/arbitrary_simplified"]
+serde = ["imap-codec/serde"]
+tag_generator = ["imap-codec/tag_generator"]
+
+# IMAP
+starttls = ["imap-codec/starttls"]
+ext_condstore_qresync = ["imap-codec/ext_condstore_qresync"]
+ext_id = ["imap-codec/ext_id"]
+ext_login_referrals = ["imap-codec/ext_login_referrals"]
+ext_mailbox_referrals = ["imap-codec/ext_mailbox_referrals"]
+ext_metadata = ["imap-codec/ext_metadata"]
+# </Forward to imap-codec>
+
 [dependencies]
 bytes = { version = "1.6.1", optional = true }
+imap-codec = { version = "2.0.0-alpha.4", features = ["quirk_crlf_relaxed"] }
 rustls = { version = "0.23.12", optional = true }
 thiserror = "1.0.63"
 tokio = { version = "1.39.1", optional = true, features = ["io-util", "macros", "net"] }
 tokio-rustls = { version = "0.26.0", optional = true }
 tracing = "0.1.40"
 
-[dependencies.imap-codec]
-version = "2.0.0-alpha.3"
-features = [
-    "quirk_crlf_relaxed",
-    "starttls",
-    #"ext_condstore_qresync",
-    "ext_id",
-    #"ext_login_referrals",
-    #"ext_mailbox_referrals",
-    "ext_metadata",
-]
-
 [dev-dependencies]
-imap-types = { version = "2.0.0-alpha.3", features = ["tag_generator"] }
+# We want to enable `tag_generator` for examples.
+imap-next = { path = ".", features = ["tag_generator"] }
+
 rand = "0.8.5"
 tokio = { version = "1.39.1", features = ["full"] }
 
