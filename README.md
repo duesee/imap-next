@@ -9,7 +9,7 @@
 flowchart LR
     imap-types --> imap-codec
     imap-codec --> imap-next
-    imap-next -.-> proxy
+    imap-next -.-> imap-proxy
     imap-next -.-> imap-client
     
     style imap-codec stroke-dasharray: 10 5
@@ -18,7 +18,7 @@ flowchart LR
     click imap-types href "https://github.com/duesee/imap-codec/tree/main/imap-types"
     click imap-codec href "https://github.com/duesee/imap-codec"
     click imap-next href "https://github.com/duesee/imap-next"
-    click proxy href "https://github.com/duesee/imap-next/tree/main/proxy"
+    click imap-proxy href "https://github.com/duesee/imap-proxy"
     click imap-client href "https://github.com/soywod/imap-client"
 ```
 
@@ -32,12 +32,15 @@ And it's sans I/O enabling the integration in any existing I/O runtime.
 
 ## Lower-level Libraries
 
-`imap-next` uses [`imap-codec`](https://github.com/duesee/imap-codec) internally for parsing and serialization, and re-exposes [`imap-types`](https://github.com/duesee/imap-codec/tree/main/imap-types).
+`imap-next` uses [`imap-codec`](https://github.com/duesee/imap-codec) internally for parsing and serialization, and
+re-exposes [`imap-types`](https://github.com/duesee/imap-codec/tree/main/imap-types).
 
 ## Higher-level Libraries
 
-* [`proxy`](https://github.com/duesee/imap-next/tree/main/proxy) is an IMAP proxy that gracefully forwards unsolicited responses, abstracts over literals, and `Debug`-prints messages.
-* [`imap-client`](https://github.com/soywod/imap-client) is a methods-based client library with a `client.capability()`, `client.login()`, ... interface.
+* [`imap-proxy`](https://github.com/duesee/imap-proxy) is an IMAP proxy that gracefully forwards unsolicited responses,
+  abstracts over literals, and `Debug`-prints messages.
+* [`imap-client`](https://github.com/soywod/imap-client) is a methods-based client library with
+  a `client.capability()`, `client.login()`, ... interface.
 
 ## Usage
 
@@ -94,7 +97,8 @@ This crate is dual-licensed under Apache 2.0 and MIT terms.
 
 # Thanks
 
-Thanks to the [NLnet Foundation](https://nlnet.nl/) for supporting `imap-next` through their [NGI Assure](https://nlnet.nl/assure/) program!
+Thanks to the [NLnet Foundation](https://nlnet.nl/) for supporting `imap-next` through
+their [NGI Assure](https://nlnet.nl/assure/) program!
 
 <div align="right">
     <img alt="NLnet logo" height="100px" src="https://user-images.githubusercontent.com/8997731/215262095-ab12d43a-ca8a-4d44-b79b-7e99ab91ca01.png"/>
