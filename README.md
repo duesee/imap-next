@@ -83,14 +83,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 ```
 
-## Playground
-
-This repository also serves as a playground for crates built on `imap-next`.
-These will eventually be moved into their own repositories.
-
-* `tag-generator` generates process-wide unique (and unguessable) IMAP tags.
-  This crate is here for organizational reasons and may be moved (or inlined) eventually.
-
 # License
 
 This crate is dual-licensed under Apache 2.0 and MIT terms.
