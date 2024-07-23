@@ -16,9 +16,9 @@ stream = ["dep:bytes", "dep:rustls", "dep:tokio", "dep:tokio-rustls"]
 
 [dependencies]
 bytes = { version = "1.6.1", optional = true }
-rustls = { version = "0.23.11", optional = true }
-thiserror = "1.0.62"
-tokio = { version = "1.38.0", optional = true, features = ["io-util", "macros", "net"] }
+rustls = { version = "0.23.12", optional = true }
+thiserror = "1.0.63"
+tokio = { version = "1.39.1", optional = true, features = ["io-util", "macros", "net"] }
 tokio-rustls = { version = "0.26.0", optional = true }
 tracing = "0.1.40"
 
@@ -37,7 +37,7 @@ features = [
 [dev-dependencies]
 imap-types = { version = "2.0.0-alpha.3", features = ["tag_generator"] }
 rand = "0.8.5"
-tokio = { version = "1.38.0", features = ["full"] }
+tokio = { version = "1.39.1", features = ["full"] }
 
 [workspace]
 resolver = "2"
