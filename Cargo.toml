@@ -30,7 +30,7 @@ ext_metadata = ["imap-codec/ext_metadata"]
 # </Forward to imap-codec>
 
 [dependencies]
-bytes = { version = "1.6.1", optional = true }
+bytes = { version = "1.7.1", optional = true }
 imap-codec = { version = "2.0.0-alpha.4", features = ["quirk_crlf_relaxed"] }
 rustls = { version = "0.23.12", optional = true }
 thiserror = "1.0.63"
