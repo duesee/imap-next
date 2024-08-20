@@ -16,7 +16,6 @@ pub struct ReceiveState {
     crlf_relaxed: bool,
     fragmentizer: Fragmentizer,
     message_has_invalid_line_ending: bool,
-    message_is_poisoned: bool,
 }
 
 impl ReceiveState {
@@ -30,7 +29,6 @@ impl ReceiveState {
             crlf_relaxed,
             fragmentizer,
             message_has_invalid_line_ending: false,
-            message_is_poisoned: false,
         }
     }
 
@@ -55,7 +53,7 @@ impl ReceiveState {
     /// To achieve this the fragments of the current message will be parsed until the end of the
     /// message. Then the message will be discarded without being decoded.
     pub fn poison_message(&mut self) {
-        self.message_is_poisoned = true;
+        self.fragmentizer.poison_message();
     }
 
     /// Tries to decode the tag of the current message before it was received completely.
@@ -82,6 +80,7 @@ impl ReceiveState {
                 }) => {
                     // Check for line ending compatibility
                     if !self.crlf_relaxed && ending == LineEnding::Lf {
+                        self.fragmentizer.poison_message();
                         self.message_has_invalid_line_ending = true;
                     }
 
@@ -91,43 +90,42 @@ impl ReceiveState {
                             return Ok(ReceiveEvent::LiteralAnnouncement { mode, length });
                         }
                         None => {
-                            // The message is now complete
-                            let result = if self.message_has_invalid_line_ending {
-                                let discarded_bytes =
-                                    Secret::new(self.fragmentizer.message_bytes().into());
-                                Err(Interrupt::Error(ReceiveError::ExpectedCrlfGotLf {
-                                    discarded_bytes,
-                                }))
-                            } else if self.message_is_poisoned {
-                                let discarded_bytes =
-                                    Secret::new(self.fragmentizer.message_bytes().into());
-                                Err(Interrupt::Error(ReceiveError::MessageIsPoisoned {
-                                    discarded_bytes,
-                                }))
-                            } else {
-                                // Decode the complete message
-                                match self.fragmentizer.decode_message(codec) {
-                                    Ok(message) => {
-                                        Ok(ReceiveEvent::DecodingSuccess(message.into_static()))
-                                    }
-                                    Err(DecodeMessageError::DecodingFailure(_)) => {
-                                        let discarded_bytes =
-                                            Secret::new(self.fragmentizer.message_bytes().into());
-                                        Err(Interrupt::Error(ReceiveError::DecodingFailure {
+                            // The message is now complete and can be decoded
+                            let result = match self.fragmentizer.decode_message(codec) {
+                                Ok(message) => {
+                                    Ok(ReceiveEvent::DecodingSuccess(message.into_static()))
+                                }
+                                Err(DecodeMessageError::DecodingFailure(_)) => {
+                                    let discarded_bytes =
+                                        Secret::new(self.fragmentizer.message_bytes().into());
+                                    Err(Interrupt::Error(ReceiveError::DecodingFailure {
+                                        discarded_bytes,
+                                    }))
+                                }
+                                Err(DecodeMessageError::DecodingRemainder { .. }) => {
+                                    let discarded_bytes =
+                                        Secret::new(self.fragmentizer.message_bytes().into());
+                                    Err(Interrupt::Error(ReceiveError::DecodingFailure {
+                                        discarded_bytes,
+                                    }))
+                                }
+                                Err(DecodeMessageError::MessageTooLong { .. }) => {
+                                    let discarded_bytes =
+                                        Secret::new(self.fragmentizer.message_bytes().into());
+                                    Err(Interrupt::Error(ReceiveError::MessageTooLong {
+                                        discarded_bytes,
+                                    }))
+                                }
+                                Err(DecodeMessageError::MessagePoisoned { .. }) => {
+                                    let discarded_bytes =
+                                        Secret::new(self.fragmentizer.message_bytes().into());
+
+                                    if self.message_has_invalid_line_ending {
+                                        Err(Interrupt::Error(ReceiveError::ExpectedCrlfGotLf {
                                             discarded_bytes,
                                         }))
-                                    }
-                                    Err(DecodeMessageError::DecodingRemainder { .. }) => {
-                                        let discarded_bytes =
-                                            Secret::new(self.fragmentizer.message_bytes().into());
-                                        Err(Interrupt::Error(ReceiveError::DecodingFailure {
-                                            discarded_bytes,
-                                        }))
-                                    }
-                                    Err(DecodeMessageError::MessageTooLong { .. }) => {
-                                        let discarded_bytes =
-                                            Secret::new(self.fragmentizer.message_bytes().into());
-                                        Err(Interrupt::Error(ReceiveError::MessageTooLong {
+                                    } else {
+                                        Err(Interrupt::Error(ReceiveError::MessageIsPoisoned {
                                             discarded_bytes,
                                         }))
                                     }
@@ -135,7 +133,6 @@ impl ReceiveState {
                             };
 
                             self.message_has_invalid_line_ending = false;
-                            self.message_is_poisoned = false;
                             return result;
                         }
                     }
