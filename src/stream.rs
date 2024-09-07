@@ -273,26 +273,26 @@ fn decrypt(
         let mut encrypted_bytes = read_buffer.reader();
         tls.read_tls(&mut encrypted_bytes)?;
         tls.process_new_packets()?;
+    }
 
-        loop {
-            let mut plain_bytes_chunk = [0; 128];
-            // We need to handle different cases according to:
-            // https://docs.rs/rustls/latest/rustls/struct.Reader.html#method.read
-            match tls.reader().read(&mut plain_bytes_chunk) {
-                // There are no more bytes to read
-                Err(err) if err.kind() == ErrorKind::WouldBlock => break,
-                // The TLS session was closed uncleanly
-                Err(err) if err.kind() == ErrorKind::UnexpectedEof => {
-                    return Err(DecryptEncryptError::Closed)
-                }
-                // We got an unexpected error
-                Err(err) => return Err(DecryptEncryptError::Io(err)),
-                // The TLS session was closed cleanly
-                Ok(0) => return Err(DecryptEncryptError::Closed),
-                // We read some plaintext bytes
-                Ok(n) => plain_bytes.extend(&plain_bytes_chunk[0..n]),
-            };
-        }
+    loop {
+        let mut plain_bytes_chunk = [0; 128];
+        // We need to handle different cases according to:
+        // https://docs.rs/rustls/latest/rustls/struct.Reader.html#method.read
+        match tls.reader().read(&mut plain_bytes_chunk) {
+            // There are no more bytes to read
+            Err(err) if err.kind() == ErrorKind::WouldBlock => break,
+            // The TLS session was closed uncleanly
+            Err(err) if err.kind() == ErrorKind::UnexpectedEof => {
+                return Err(DecryptEncryptError::Closed)
+            }
+            // We got an unexpected error
+            Err(err) => return Err(DecryptEncryptError::Io(err)),
+            // The TLS session was closed cleanly
+            Ok(0) => return Err(DecryptEncryptError::Closed),
+            // We read some plaintext bytes
+            Ok(n) => plain_bytes.extend(&plain_bytes_chunk[0..n]),
+        };
     }
 
     Ok(plain_bytes)
