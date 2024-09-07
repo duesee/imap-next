@@ -99,6 +99,9 @@ impl Stream {
                     // Decrypt input bytes
                     let plain_bytes = decrypt(tls, &mut self.read_buffer)?;
 
+                    #[cfg(debug_assertions)]
+                    trace!(data = escape_byte_string(&plain_bytes), "io/read/plain");
+
                     // Provide input bytes to the client/server
                     if !plain_bytes.is_empty() {
                         state.enqueue_input(&plain_bytes);
@@ -135,6 +138,9 @@ impl Stream {
                     } else {
                         Vec::new()
                     };
+
+                    #[cfg(debug_assertions)]
+                    trace!(data = escape_byte_string(&plain_bytes), "io/write/plain");
 
                     // Encrypt output bytes
                     encrypt(tls, &mut self.write_buffer, plain_bytes)?;
@@ -208,7 +214,7 @@ async fn read<S: AsyncRead + Unpin>(
     let byte_count = stream.read_buf(read_buffer).await?;
     #[cfg(debug_assertions)]
     trace!(
-        data = escape_byte_string(&read_buffer[old_len..]),
+        data = ?&read_buffer[old_len..],
         "io/read/raw"
     );
 
@@ -230,7 +236,7 @@ async fn write<S: AsyncWrite + Unpin>(
         let byte_count = stream.write(write_buffer).await?;
         #[cfg(debug_assertions)]
         trace!(
-            data = escape_byte_string(&write_buffer[..byte_count]),
+            data = ?&write_buffer[..byte_count],
             "io/write/raw"
         );
         write_buffer.advance(byte_count);
