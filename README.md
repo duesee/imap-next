@@ -58,7 +58,7 @@ use tokio::net::TcpStream;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mut stream = Stream::insecure(TcpStream::connect("127.0.0.1:1143").await?);
+    let mut stream = Stream::new(TcpStream::connect("127.0.0.1:1143").await?);
     let mut client = Client::new(Options::default());
 
     loop {

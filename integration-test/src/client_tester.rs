@@ -25,7 +25,7 @@ impl ClientTester {
     ) -> Self {
         let stream = TcpStream::connect(server_address).await.unwrap();
         trace!(?server_address, "Client is connected");
-        let stream = Stream::insecure(stream);
+        let stream = Stream::new(stream);
         let client = Client::new(client_options);
         Self {
             codecs,
@@ -344,13 +344,16 @@ impl ClientTester {
 #[allow(clippy::large_enum_variant)]
 enum ConnectionState {
     /// Connection to server established.
-    Connected { stream: Stream, client: Client },
+    Connected {
+        stream: Stream<TcpStream>,
+        client: Client,
+    },
     /// Connection dropped.
     Disconnected,
 }
 
 impl ConnectionState {
-    fn connected(&mut self) -> (&mut Stream, &mut Client) {
+    fn connected(&mut self) -> (&mut Stream<TcpStream>, &mut Client) {
         match self {
             ConnectionState::Connected { stream, client } => (stream, client),
             ConnectionState::Disconnected => panic!("Client is already disconnected"),

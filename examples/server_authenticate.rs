@@ -10,7 +10,7 @@ use tokio::net::TcpListener;
 async fn main() {
     let listener = TcpListener::bind("127.0.0.1:12345").await.unwrap();
     let (stream, _) = listener.accept().await.unwrap();
-    let mut stream = Stream::insecure(stream);
+    let mut stream = Stream::new(stream);
     let mut server = Server::new(
         Options::default(),
         Greeting::ok(None, "server_idle (example)").unwrap(),
