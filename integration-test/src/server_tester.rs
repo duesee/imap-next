@@ -4,7 +4,7 @@ use imap_next::{
     server::{self, ResponseHandle, Server},
     stream::{self, Stream},
 };
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tracing::trace;
 
 use crate::codecs::Codecs;
@@ -24,7 +24,7 @@ impl ServerTester {
     ) -> Self {
         let (stream, client_address) = server_listener.accept().await.unwrap();
         trace!(?client_address, "Server accepts connection");
-        let stream = Stream::insecure(stream);
+        let stream = Stream::new(stream);
         Self {
             codecs,
             server_options,
@@ -308,15 +308,20 @@ impl ServerTester {
 #[allow(clippy::large_enum_variant)]
 enum ConnectionState {
     // Connection to client established.
-    Connected { stream: Stream },
+    Connected {
+        stream: Stream<TcpStream>,
+    },
     // Server greeted client.
-    Greeted { stream: Stream, server: Server },
+    Greeted {
+        stream: Stream<TcpStream>,
+        server: Server,
+    },
     // Connection dropped.
     Disconnected,
 }
 
 impl ConnectionState {
-    fn greeted(&mut self) -> (&mut Stream, &mut Server) {
+    fn greeted(&mut self) -> (&mut Stream<TcpStream>, &mut Server) {
         match self {
             ConnectionState::Connected { .. } => panic!("Server has not greeted yet"),
             ConnectionState::Greeted { stream, server } => (stream, server),
