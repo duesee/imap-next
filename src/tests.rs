@@ -5,6 +5,7 @@ use imap_codec::imap_types::{
     response::{Greeting, Status},
 };
 use tokio::net::{TcpListener, TcpStream};
+use tokio_util::compat::TokioAsyncReadCompatExt;
 
 use crate::{
     client::{self, Client},
@@ -25,7 +26,7 @@ async fn self_test() {
 
         async move {
             let (stream, _) = listener.accept().await.unwrap();
-            let mut stream = Stream::insecure(stream);
+            let mut stream = Stream::new(stream.compat());
             let mut server = Server::new(server::Options::default(), greeting.clone());
 
             loop {
@@ -50,7 +51,7 @@ async fn self_test() {
     let _ = tokio::task::spawn(server);
 
     let stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-    let mut stream = Stream::insecure(stream);
+    let mut stream = Stream::new(stream.compat());
     let mut client = Client::new(client::Options::default());
 
     client.enqueue_command(Command::new(Tag::unvalidated("A1"), CommandBody::Capability).unwrap());

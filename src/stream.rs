@@ -1,111 +1,68 @@
 use std::{
+    collections::VecDeque,
     convert::Infallible,
-    io::{ErrorKind, Read, Write},
+    future::{poll_fn, Future},
+    io::IoSlice,
+    pin::pin,
+    task::{Context, Poll},
 };
 
-use bytes::{Buf, BufMut, BytesMut};
+use futures_util::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 #[cfg(debug_assertions)]
 use imap_codec::imap_types::utils::escape_byte_string;
 use thiserror::Error;
-use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    net::TcpStream,
-    select,
-};
-use tokio_rustls::{rustls, TlsStream};
 #[cfg(debug_assertions)]
 use tracing::trace;
 
 use crate::{Interrupt, Io, State};
 
-pub struct Stream {
-    stream: TcpStream,
-    tls: Option<rustls::Connection>,
-    read_buffer: BytesMut,
-    write_buffer: BytesMut,
+pub struct Stream<S> {
+    stream: S,
+    read_buffer: ReadBuffer,
+    write_buffer: WriteBuffer,
 }
 
-impl Stream {
-    pub fn insecure(stream: TcpStream) -> Self {
+impl<S> Stream<S> {
+    pub fn new(stream: S) -> Self {
         Self {
             stream,
-            tls: None,
-            read_buffer: BytesMut::default(),
-            write_buffer: BytesMut::default(),
+            read_buffer: ReadBuffer::new(),
+            write_buffer: WriteBuffer::new(),
         }
     }
+}
 
-    pub fn tls(stream: TlsStream<TcpStream>) -> Self {
-        // We want to use `TcpStream::split` for handling reading and writing separately,
-        // but `TlsStream` does not expose this functionality. Therefore, we destruct `TlsStream`
-        // into `TcpStream` and `rustls::Connection` and handling them ourselves.
-        //
-        // Some notes:
-        //
-        // - There is also `tokio::io::split` which works for all kind of streams. But this
-        //   involves too much scary magic because its use-case is reading and writing from
-        //   different threads. We prefer to use the more low-level `TcpStream::split`.
-        //
-        // - We could get rid of `TlsStream` and construct `rustls::Connection` directly.
-        //   But `TlsStream` is still useful because it gives us the guarantee that the handshake
-        //   was already handled properly.
-        //
-        // - In the long run it would be nice if `TlsStream::split` would exist and we would use
-        //   it because `TlsStream` is better at handling the edge cases of `rustls`.
-        let (stream, tls) = match stream {
-            TlsStream::Client(stream) => {
-                let (stream, tls) = stream.into_inner();
-                (stream, rustls::Connection::Client(tls))
-            }
-            TlsStream::Server(stream) => {
-                let (stream, tls) = stream.into_inner();
-                (stream, rustls::Connection::Server(tls))
-            }
-        };
-
-        Self {
-            stream,
-            tls: Some(tls),
-            read_buffer: BytesMut::default(),
-            write_buffer: BytesMut::default(),
-        }
+impl<S> Stream<S> {
+    #[cfg(feature = "expose_stream")]
+    /// Return the underlying stream for debug purposes (or experiments).
+    ///
+    /// Note: Writing to or reading from the stream may introduce
+    /// conflicts with `imap-next`.
+    pub fn stream_mut(&mut self) -> &mut S {
+        &mut self.stream
     }
 
+    /// Take the underlying stream out of a [`Stream`].
+    ///
+    /// Useful when a TCP stream needs to be upgraded to a TLS one.
+    #[cfg(feature = "expose_stream")]
+    pub fn into_stream(self) -> S {
+        self.stream
+    }
+}
+
+impl<S: AsyncWrite + Unpin> Stream<S> {
     pub async fn flush(&mut self) -> Result<(), Error<Infallible>> {
-        // Flush TLS
-        if let Some(tls) = &mut self.tls {
-            tls.writer().flush()?;
-            encrypt(tls, &mut self.write_buffer, Vec::new())?;
-        }
-
-        // Flush TCP
-        write(&mut self.stream, &mut self.write_buffer).await?;
+        poll_fn(|cx| self.write_buffer.poll_write(&mut self.stream, cx)).await?;
         self.stream.flush().await?;
 
         Ok(())
     }
+}
 
+impl<S: AsyncRead + AsyncWrite + Unpin> Stream<S> {
     pub async fn next<F: State>(&mut self, mut state: F) -> Result<F::Event, Error<F::Error>> {
         let event = loop {
-            match &mut self.tls {
-                None => {
-                    // Provide input bytes to the client/server
-                    if !self.read_buffer.is_empty() {
-                        state.enqueue_input(&self.read_buffer);
-                        self.read_buffer.clear();
-                    }
-                }
-                Some(tls) => {
-                    // Decrypt input bytes
-                    let plain_bytes = decrypt(tls, &mut self.read_buffer)?;
-
-                    // Provide input bytes to the client/server
-                    if !plain_bytes.is_empty() {
-                        state.enqueue_input(&plain_bytes);
-                    }
-                }
-            }
-
             // Progress the client/server
             let result = state.next();
 
@@ -121,61 +78,39 @@ impl Stream {
                 Interrupt::Error(err) => return Err(Error::State(err)),
             };
 
-            match &mut self.tls {
-                None => {
-                    // Handle the output bytes from the client/server
-                    if let Io::Output(bytes) = io {
-                        self.write_buffer.extend(bytes);
-                    }
-                }
-                Some(tls) => {
-                    // Handle the output bytes from the client/server
-                    let plain_bytes = if let Io::Output(bytes) = io {
-                        bytes
-                    } else {
-                        Vec::new()
-                    };
-
-                    // Encrypt output bytes
-                    encrypt(tls, &mut self.write_buffer, plain_bytes)?;
-                }
+            // Handle the output bytes from the client/server
+            if let Io::Output(bytes) = io {
+                self.write_buffer.push_bytes(bytes);
             }
 
             // Progress the stream
-            if self.write_buffer.is_empty() {
-                read(&mut self.stream, &mut self.read_buffer).await?;
-            } else {
-                // We read and write the stream simultaneously because otherwise
-                // a deadlock between client and server might occur if both sides
-                // would only read or only write.
-                let (read_stream, write_stream) = self.stream.split();
-                select! {
-                    result = read(read_stream, &mut self.read_buffer) => result,
-                    result = write(write_stream, &mut self.write_buffer) => result,
-                }?;
-            };
+            poll_fn(|cx| {
+                let result = if self.write_buffer.needs_write() {
+                    // We read and write the stream simultaneously because otherwise
+                    // a deadlock between client and server might occur if both sides
+                    // would only read or only write. We achieve this by polling both
+                    // operations before blocking.
+                    match self.write_buffer.poll_write(&mut self.stream, cx) {
+                        Poll::Ready(result) => return Poll::Ready(result),
+                        Poll::Pending => self.read_buffer.poll_read(&mut self.stream, cx)?,
+                    }
+                } else {
+                    // Nothing to write, just read
+                    self.read_buffer.poll_read(&mut self.stream, cx)?
+                };
+
+                if let Poll::Ready(bytes) = result {
+                    // Provide input bytes to the client/server and try again
+                    state.enqueue_input(bytes);
+                    Poll::Ready(Ok(()))
+                } else {
+                    Poll::Pending
+                }
+            })
+            .await?;
         };
 
         Ok(event)
-    }
-
-    #[cfg(feature = "expose_stream")]
-    /// Return the underlying stream for debug purposes (or experiments).
-    ///
-    /// Note: Writing to or reading from the stream may introduce
-    /// conflicts with `imap-next`.
-    pub fn stream_mut(&mut self) -> &mut TcpStream {
-        &mut self.stream
-    }
-}
-
-/// Take the [`TcpStream`] out of a [`Stream`].
-///
-/// Useful when a TCP stream needs to be upgraded to a TLS one.
-#[cfg(feature = "expose_stream")]
-impl From<Stream> for TcpStream {
-    fn from(stream: Stream) -> Self {
-        stream.stream
     }
 }
 
@@ -190,60 +125,121 @@ pub enum Error<E> {
     Closed,
     /// An I/O error occurred in the underlying stream.
     #[error(transparent)]
-    Io(#[from] tokio::io::Error),
-    /// An error occurred in the underlying TLS connection.
-    #[error(transparent)]
-    Tls(#[from] rustls::Error),
+    Io(#[from] std::io::Error),
     /// An error occurred while progressing the state.
     #[error(transparent)]
     State(E),
 }
 
-async fn read<S: AsyncRead + Unpin>(
-    mut stream: S,
-    read_buffer: &mut BytesMut,
-) -> Result<(), ReadWriteError> {
-    #[cfg(debug_assertions)]
-    let old_len = read_buffer.len();
-    let byte_count = stream.read_buf(read_buffer).await?;
-    #[cfg(debug_assertions)]
-    trace!(
-        data = escape_byte_string(&read_buffer[old_len..]),
-        "io/read/raw"
-    );
-
-    if byte_count == 0 {
-        // The result is 0 if the stream reached "end of file" or the read buffer was
-        // already full before calling `read_buf`. Because we use an unlimited buffer we
-        // know that the first case occurred.
-        return Err(ReadWriteError::Closed);
-    }
-
-    Ok(())
+struct ReadBuffer {
+    /// Temporary read buffer for input bytes.
+    ///
+    /// The buffer is non-empty and and has a fixed-size. Read bytes will overwrite the
+    /// buffer and then immediately enqueued as input to [`State`].
+    bytes: Box<[u8]>,
 }
 
-async fn write<S: AsyncWrite + Unpin>(
-    mut stream: S,
-    write_buffer: &mut BytesMut,
-) -> Result<(), ReadWriteError> {
-    while !write_buffer.is_empty() {
-        let byte_count = stream.write(write_buffer).await?;
-        #[cfg(debug_assertions)]
-        trace!(
-            data = escape_byte_string(&write_buffer[..byte_count]),
-            "io/write/raw"
-        );
-        write_buffer.advance(byte_count);
-
-        if byte_count == 0 {
-            // The result is 0 if the stream doesn't accept bytes anymore or the write buffer
-            // was already empty before calling `write_buf`. Because we checked the buffer
-            // we know that the first case occurred.
-            return Err(ReadWriteError::Closed);
+impl ReadBuffer {
+    fn new() -> Self {
+        Self {
+            bytes: vec![0; 1024].into(),
         }
     }
 
-    Ok(())
+    fn poll_read<S: AsyncRead + Unpin>(
+        &mut self,
+        stream: &mut S,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<&[u8], ReadWriteError>> {
+        // Constructing this future is cheap
+        let read_future = pin!(stream.read(&mut self.bytes));
+        let Poll::Ready(byte_count) = read_future.poll(cx)? else {
+            return Poll::Pending;
+        };
+
+        #[cfg(debug_assertions)]
+        trace!(
+            data = escape_byte_string(&self.bytes[0..byte_count]),
+            "io/read/raw"
+        );
+
+        if byte_count == 0 {
+            // The result is 0 if the stream reached "end of file"
+            return Poll::Ready(Err(ReadWriteError::Closed));
+        }
+
+        Poll::Ready(Ok(&self.bytes[0..byte_count]))
+    }
+}
+
+struct WriteBuffer {
+    /// Queue for output bytes that needs to be written.
+    ///
+    /// The output of [`State`] will be written to this queue. Output bytes will be enqueued
+    /// to the back and written bytes will be dequeued from the front.
+    bytes: VecDeque<u8>,
+}
+
+impl WriteBuffer {
+    fn new() -> Self {
+        Self {
+            bytes: VecDeque::new(),
+        }
+    }
+
+    fn push_bytes(&mut self, bytes: Vec<u8>) {
+        self.bytes.extend(bytes)
+    }
+
+    fn needs_write(&self) -> bool {
+        !self.bytes.is_empty()
+    }
+
+    fn write_slices(&mut self) -> [IoSlice; 2] {
+        let (init, tail) = self.bytes.as_slices();
+        [IoSlice::new(init), IoSlice::new(tail)]
+    }
+
+    fn poll_write<S: AsyncWrite + Unpin>(
+        &mut self,
+        stream: &mut S,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), ReadWriteError>> {
+        while !self.bytes.is_empty() {
+            let write_slices = &self.write_slices();
+
+            // Constructing this future is cheap
+            let write_future = pin!(stream.write_vectored(write_slices));
+            let Poll::Ready(byte_count) = write_future.poll(cx)? else {
+                return Poll::Pending;
+            };
+
+            #[cfg(debug_assertions)]
+            trace!(
+                data = escape_byte_string(
+                    self
+                        .bytes
+                        .iter()
+                        .copied()
+                        .take(byte_count)
+                        .collect::<Vec<_>>()
+                ),
+                "io/write/raw"
+            );
+
+            // Drop written bytes
+            drop(self.bytes.drain(..byte_count));
+
+            if byte_count == 0 {
+                // The result is 0 if the stream doesn't accept bytes anymore or the write buffer
+                // was already empty before calling `write_buf`. Because we checked the buffer
+                // we know that the first case occurred.
+                return Poll::Ready(Err(ReadWriteError::Closed));
+            }
+        }
+
+        Poll::Ready(Ok(()))
+    }
 }
 
 #[derive(Debug, Error)]
@@ -251,7 +247,7 @@ enum ReadWriteError {
     #[error("Stream was closed")]
     Closed,
     #[error(transparent)]
-    Io(#[from] tokio::io::Error),
+    Io(#[from] std::io::Error),
 }
 
 impl<E> From<ReadWriteError> for Error<E> {
@@ -259,78 +255,6 @@ impl<E> From<ReadWriteError> for Error<E> {
         match value {
             ReadWriteError::Closed => Error::Closed,
             ReadWriteError::Io(err) => Error::Io(err),
-        }
-    }
-}
-
-fn decrypt(
-    tls: &mut rustls::Connection,
-    read_buffer: &mut BytesMut,
-) -> Result<Vec<u8>, DecryptEncryptError> {
-    let mut plain_bytes = Vec::new();
-
-    while tls.wants_read() && !read_buffer.is_empty() {
-        let mut encrypted_bytes = read_buffer.reader();
-        tls.read_tls(&mut encrypted_bytes)?;
-        tls.process_new_packets()?;
-    }
-
-    loop {
-        let mut plain_bytes_chunk = [0; 128];
-        // We need to handle different cases according to:
-        // https://docs.rs/rustls/latest/rustls/struct.Reader.html#method.read
-        match tls.reader().read(&mut plain_bytes_chunk) {
-            // There are no more bytes to read
-            Err(err) if err.kind() == ErrorKind::WouldBlock => break,
-            // The TLS session was closed uncleanly
-            Err(err) if err.kind() == ErrorKind::UnexpectedEof => {
-                return Err(DecryptEncryptError::Closed)
-            }
-            // We got an unexpected error
-            Err(err) => return Err(DecryptEncryptError::Io(err)),
-            // The TLS session was closed cleanly
-            Ok(0) => return Err(DecryptEncryptError::Closed),
-            // We read some plaintext bytes
-            Ok(n) => plain_bytes.extend(&plain_bytes_chunk[0..n]),
-        };
-    }
-
-    Ok(plain_bytes)
-}
-
-fn encrypt(
-    tls: &mut rustls::Connection,
-    write_buffer: &mut BytesMut,
-    plain_bytes: Vec<u8>,
-) -> Result<(), DecryptEncryptError> {
-    if !plain_bytes.is_empty() {
-        tls.writer().write_all(&plain_bytes)?;
-    }
-
-    while tls.wants_write() {
-        let mut encrypted_bytes = write_buffer.writer();
-        tls.write_tls(&mut encrypted_bytes)?;
-    }
-
-    Ok(())
-}
-
-#[derive(Debug, Error)]
-enum DecryptEncryptError {
-    #[error("Session was closed")]
-    Closed,
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-    #[error(transparent)]
-    Tls(#[from] rustls::Error),
-}
-
-impl<E> From<DecryptEncryptError> for Error<E> {
-    fn from(value: DecryptEncryptError) -> Self {
-        match value {
-            DecryptEncryptError::Closed => Error::Closed,
-            DecryptEncryptError::Io(err) => Error::Io(err),
-            DecryptEncryptError::Tls(err) => Error::Tls(err),
         }
     }
 }

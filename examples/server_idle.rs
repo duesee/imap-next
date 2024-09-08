@@ -11,12 +11,13 @@ use imap_next::{
     stream::Stream,
 };
 use tokio::{net::TcpListener, sync::mpsc::Receiver};
+use tokio_util::compat::TokioAsyncReadCompatExt;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let listener = TcpListener::bind("127.0.0.1:12345").await.unwrap();
     let (stream, _) = listener.accept().await.unwrap();
-    let mut stream = Stream::insecure(stream);
+    let mut stream = Stream::new(stream.compat());
     let mut server = Server::new(
         Options::default(),
         Greeting::ok(None, "server_idle (example)").unwrap(),

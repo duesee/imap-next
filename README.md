@@ -55,10 +55,11 @@ use imap_next::{
     stream::Stream,
 };
 use tokio::net::TcpStream;
+use tokio_util::compat::TokioAsyncReadCompatExt;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mut stream = Stream::insecure(TcpStream::connect("127.0.0.1:1143").await?);
+    let mut stream = Stream::new(TcpStream::connect("127.0.0.1:1143").await?.compat());
     let mut client = Client::new(Options::default());
 
     loop {

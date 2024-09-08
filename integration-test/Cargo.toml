@@ -8,9 +8,10 @@ publish = false
 [dependencies]
 bstr = { version = "1.10.0", default-features = false }
 bytes = "1.7.1"
-imap-codec = { version = "2.0.0-alpha.4" }
+imap-codec = { version = "2.0.0-alpha.5" }
 imap-next = { path = ".." }
-tokio = { version = "1.40.0", features = ["macros", "net", "rt", "time"] }
+tokio = { version = "1.40.0", features = ["io-util", "macros", "net", "rt", "time"] }
+tokio-util = { version = "0.7.12", features = ["compat"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 

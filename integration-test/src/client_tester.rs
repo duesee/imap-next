@@ -7,6 +7,7 @@ use imap_next::{
     stream::{self, Stream},
 };
 use tokio::net::TcpStream;
+use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
 use tracing::trace;
 
 use crate::codecs::Codecs;
@@ -25,7 +26,7 @@ impl ClientTester {
     ) -> Self {
         let stream = TcpStream::connect(server_address).await.unwrap();
         trace!(?server_address, "Client is connected");
-        let stream = Stream::insecure(stream);
+        let stream = Stream::new(stream.compat());
         let client = Client::new(client_options);
         Self {
             codecs,
@@ -344,13 +345,16 @@ impl ClientTester {
 #[allow(clippy::large_enum_variant)]
 enum ConnectionState {
     /// Connection to server established.
-    Connected { stream: Stream, client: Client },
+    Connected {
+        stream: Stream<Compat<TcpStream>>,
+        client: Client,
+    },
     /// Connection dropped.
     Disconnected,
 }
 
 impl ConnectionState {
-    fn connected(&mut self) -> (&mut Stream, &mut Client) {
+    fn connected(&mut self) -> (&mut Stream<Compat<TcpStream>>, &mut Client) {
         match self {
             ConnectionState::Connected { stream, client } => (stream, client),
             ConnectionState::Disconnected => panic!("Client is already disconnected"),
