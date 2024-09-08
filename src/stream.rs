@@ -12,7 +12,7 @@ use tokio::{
     net::TcpStream,
     select,
 };
-use tokio_rustls::TlsStream;
+use tokio_rustls::{rustls, TlsStream};
 #[cfg(debug_assertions)]
 use tracing::trace;
 
