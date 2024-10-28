@@ -2,7 +2,7 @@
 [![audit](https://github.com/duesee/imap-next/actions/workflows/audit.yml/badge.svg)](https://github.com/duesee/imap-next/actions/workflows/audit.yml)
 [![Coverage](https://coveralls.io/repos/github/duesee/imap-next/badge.svg?branch=main)](https://coveralls.io/github/duesee/imap-next?branch=main)
 
-# imap-next
+# imap-next 𓅟
 
 ```mermaid
 %%{init: {'theme': 'neutral' } }%%
