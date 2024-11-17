@@ -88,11 +88,16 @@ coverage: install_rust_llvm_tools_preview install_cargo_grcov
     rm *.profraw
     rm integration-test/*.profraw
 
-# Check minimal dependency versions and MSRV
-minimal_versions: install_rust_1_70 install_rust_nightly
+# Check MSRV
+check_msrv: install_rust_1_74
+    cargo +1.74 check --workspace --all-targets --all-features 
+    cargo +1.74 test --workspace --all-targets --all-features
+
+# Check minimal dependency versions
+check_minimal_dependency_versions: install_rust_nightly
     cargo +nightly update -Z minimal-versions
-    cargo +1.70 check --workspace --all-targets --all-features 
-    cargo +1.70 test --workspace --all-targets --all-features
+    cargo check --workspace --all-targets --all-features 
+    cargo test --workspace --all-targets --all-features
     cargo update
 
 ###############
@@ -100,7 +105,7 @@ minimal_versions: install_rust_1_70 install_rust_nightly
 ###############
 
 # Install required tooling (ahead of time)
-install: install_rust_1_70 \
+install: install_rust_1_74 \
          install_rust_nightly \
          install_rust_nightly_fmt \
 	 install_rust_llvm_tools_preview \
@@ -112,11 +117,11 @@ install: install_rust_1_70 \
          install_cargo_semver_checks
 
 [private]
-install_rust_1_70:
+install_rust_1_74:
     # Fix issue
-    rustup update --no-self-update 1.70
+    rustup update --no-self-update 1.74
     rustup set profile minimal
-    # rustup toolchain install 1.70 --profile minimal
+    # rustup toolchain install 1.74 --profile minimal
 
 [private]
 install_rust_nightly:
