@@ -3,6 +3,8 @@
 pub mod client;
 mod client_send;
 mod handle;
+#[cfg(feature = "stream")]
+mod progress_stream;
 mod receive;
 pub mod server;
 mod server_send;

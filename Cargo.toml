@@ -12,7 +12,7 @@ exclude = [".github"]
 [features]
 default = ["stream"]
 expose_stream = []
-stream = ["dep:futures-util"]
+stream = ["dep:futures-io"]
 
 # <Forward to imap-codec>
 arbitrary = ["imap-codec/arbitrary"]
@@ -30,7 +30,7 @@ ext_metadata = ["imap-codec/ext_metadata"]
 # </Forward to imap-codec>
 
 [dependencies]
-futures-util = { version = "0.3.31", optional = true, default-features = false, features = ["io"] }
+futures-io = { version = "0.3.31", optional = true }
 imap-codec = { version = "2.0.0-alpha.5", features = ["quirk_crlf_relaxed"] }
 thiserror = "1.0.63"
 tracing = "0.1.40"
