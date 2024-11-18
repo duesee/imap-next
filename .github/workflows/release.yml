@@ -1,0 +1,34 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assert release version matches crate version
+        run: |
+          set -euo pipefail
+
+          # Get release version from Git tag
+          tag_version=${GITHUB_REF#refs/tags/v}
+
+          # Get crate version from Cargo.toml
+          crate_version=$(cargo read-manifest | jq -r .version)
+
+          if [ "$tag_version" != "$crate_version" ]; then
+            echo "Error: Release version ${tag_version} from Git tag does not match crate version ${crate_version} from Cargo.toml"
+            exit 1
+          fi
+
+      - name: Publish crate to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish
