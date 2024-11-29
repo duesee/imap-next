@@ -26,10 +26,19 @@ static HANDLE_GENERATOR_GENERATOR: HandleGeneratorGenerator<CommandHandle> =
 #[non_exhaustive]
 pub struct Options {
     pub crlf_relaxed: bool,
+
     /// Max response size that can be parsed by the client.
     ///
     /// Bigger responses raise an error.
     pub max_response_size: u32,
+
+    /// Forces the client not to handle greetings.
+    ///
+    /// If `true`, the next expected message is directly set to
+    /// `NextExpectedMessage::Response`. This is particularly useful
+    /// when greetings are processed outside of the [`Client`] scope
+    /// (e.g. custom STARTTLS).
+    pub discard_greeting: bool,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -42,6 +51,8 @@ impl Default for Options {
             // because we assume that a client has usually less resource constraints than the
             // server.
             max_response_size: 100 * 1024 * 1024,
+            // Process greetings by default
+            discard_greeting: false,
         }
     }
 }
@@ -63,7 +74,11 @@ impl Client {
 
         let receive_state =
             ReceiveState::new(options.crlf_relaxed, Some(options.max_response_size));
-        let next_expected_message = NextExpectedMessage::Greeting(GreetingCodec::default());
+        let next_expected_message = if options.discard_greeting {
+            NextExpectedMessage::Response(ResponseCodec::default())
+        } else {
+            NextExpectedMessage::Greeting(GreetingCodec::default())
+        };
 
         Self {
             handle_generator: HANDLE_GENERATOR_GENERATOR.generate(),
@@ -71,6 +86,15 @@ impl Client {
             receive_state,
             next_expected_message,
         }
+    }
+
+    pub fn discard_greeting(&mut self) {
+        self.next_expected_message = NextExpectedMessage::Response(ResponseCodec::default());
+    }
+
+    pub fn with_greeting_discarded(mut self) -> Self {
+        self.discard_greeting();
+        self
     }
 
     /// Enqueues the [`Command`] for being sent to the client.
