@@ -10,6 +10,7 @@ use imap_codec::{
     AuthenticateDataCodec, CommandCodec, GreetingCodec, IdleDoneCodec, ResponseCodec,
 };
 use thiserror::Error;
+use tracing::warn;
 
 use crate::{
     client_send::{ClientSendEvent, ClientSendState, ClientSendTermination},
@@ -89,7 +90,11 @@ impl Client {
     }
 
     pub fn discard_greeting(&mut self) {
-        self.next_expected_message = NextExpectedMessage::Response(ResponseCodec::default());
+        if matches!(self.next_expected_message, NextExpectedMessage::Greeting(_)) {
+            self.next_expected_message = NextExpectedMessage::Response(ResponseCodec::default());
+        } else {
+            warn!("greeting already discarded, ignoring");
+        }
     }
 
     pub fn with_greeting_discarded(mut self) -> Self {
