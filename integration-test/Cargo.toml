@@ -10,7 +10,7 @@ bstr = { version = "1.11.0", default-features = false }
 bytes = "1.8.0"
 imap-codec = { version = "2.0.0-alpha.4" }
 imap-next = { path = ".." }
-tokio = { version = "1.41.1", features = ["macros", "net", "rt", "time"] }
+tokio = { version = "1.43.1", features = ["macros", "net", "rt", "time"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
