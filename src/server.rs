@@ -69,7 +69,7 @@ impl Default for Options {
 }
 
 impl Options {
-    pub fn literal_accept_text(&self) -> &Text {
+    pub fn literal_accept_text(&self) -> &Text<'_> {
         match self.literal_accept_ccr {
             CommandContinuationRequest::Basic(ref basic) => basic.text(),
             CommandContinuationRequest::Base64(_) => unreachable!(),
@@ -88,7 +88,7 @@ impl Options {
         }
     }
 
-    pub fn literal_reject_text(&self) -> &Text {
+    pub fn literal_reject_text(&self) -> &Text<'_> {
         match self.literal_reject_ccr {
             CommandContinuationRequest::Basic(ref basic) => basic.text(),
             CommandContinuationRequest::Base64(_) => unreachable!(),
