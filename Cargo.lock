@@ -150,7 +150,7 @@ dependencies = [
 
 [[package]]
 name = "imap-next"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "bytes",
  "imap-codec",
