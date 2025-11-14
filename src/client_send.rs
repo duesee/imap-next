@@ -13,7 +13,12 @@ use imap_codec::{
 };
 use tracing::warn;
 
-use crate::{client::CommandHandle, types::CommandAuthenticate, Interrupt, Io};
+use crate::{
+    client::CommandHandle,
+    fragment::{write_fragment, FragmentKind},
+    types::CommandAuthenticate,
+    Interrupt, Io,
+};
 
 pub struct ClientSendState {
     command_codec: CommandCodec,
@@ -456,7 +461,7 @@ impl CommandState {
             CommandActivity::PushingFragments { accepted_literal } => {
                 // First push the accepted literal if available
                 if let Some(data) = accepted_literal {
-                    write_buffer.extend(data);
+                    write_fragment(write_buffer, &data, FragmentKind::Literal);
                 }
 
                 // Push as many fragments as possible
@@ -469,7 +474,7 @@ impl CommandState {
                                 mode: LiteralMode::NonSync,
                             },
                         ) => {
-                            write_buffer.extend(data);
+                            write_fragment(write_buffer, &data, FragmentKind::Line);
                         }
                         Some(Fragment::Literal {
                             data,
@@ -550,11 +555,11 @@ impl AuthenticateState {
     fn push_to_buffer(self, write_buffer: &mut Vec<u8>) -> Self {
         let activity = match self.activity {
             AuthenticateActivity::PushingAuthenticate { authenticate } => {
-                write_buffer.extend(authenticate);
+                write_fragment(write_buffer, &authenticate, FragmentKind::Line);
                 AuthenticateActivity::WaitingForAuthenticateSent
             }
             AuthenticateActivity::PushingAuthenticateData { authenticate_data } => {
-                write_buffer.extend(authenticate_data);
+                write_fragment(write_buffer, &authenticate_data, FragmentKind::Literal);
                 AuthenticateActivity::WaitingForAuthenticateDataSent
             }
             activity => activity,
@@ -619,11 +624,11 @@ impl IdleState {
     fn push_to_buffer(self, write_buffer: &mut Vec<u8>) -> Self {
         let activity = match self.activity {
             IdleActivity::PushingIdle { idle } => {
-                write_buffer.extend(idle);
+                write_fragment(write_buffer, &idle, FragmentKind::Line);
                 IdleActivity::WaitingForIdleSent
             }
             IdleActivity::PushingIdleDone { idle_done } => {
-                write_buffer.extend(idle_done);
+                write_fragment(write_buffer, &idle_done, FragmentKind::Line);
                 IdleActivity::WaitingForIdleDoneSent
             }
             activity => activity,

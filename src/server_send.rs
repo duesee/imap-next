@@ -6,7 +6,11 @@ use imap_codec::{
     GreetingCodec, ResponseCodec,
 };
 
-use crate::{server::ResponseHandle, Interrupt, Io};
+use crate::{
+    fragment::{write_fragment, FragmentKind},
+    server::ResponseHandle,
+    Interrupt, Io,
+};
 
 pub struct ServerSendState {
     greeting_codec: GreetingCodec,
@@ -113,15 +117,16 @@ impl QueuedMessage {
 
 fn push_encoded_to_buffer(write_buffer: &mut Vec<u8>, encoded: Encoded) {
     for fragment in encoded {
-        let data = match fragment {
-            Fragment::Line { data } => data,
+        match fragment {
+            Fragment::Line { data } => write_fragment(write_buffer, &data, FragmentKind::Line),
             // Note: The server doesn't need to wait before sending a literal.
             //       Thus, non-sync literals doesn't make sense here.
             //       This is currently an issue in imap-codec,
             //       see https://github.com/duesee/imap-codec/issues/332
-            Fragment::Literal { data, .. } => data,
+            Fragment::Literal { data, .. } => {
+                write_fragment(write_buffer, &data, FragmentKind::Literal)
+            }
         };
-        write_buffer.extend(data);
     }
 }
 

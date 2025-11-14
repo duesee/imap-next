@@ -10,7 +10,7 @@ use imap_codec::{
     },
 };
 
-use crate::{Interrupt, Io};
+use crate::{fragment::read_fragment, Interrupt, Io};
 
 pub struct ReceiveState {
     crlf_relaxed: bool,
@@ -69,7 +69,7 @@ impl ReceiveState {
     {
         loop {
             // Parse the next fragment
-            let fragment_info = self.fragmentizer.progress();
+            let fragment_info = read_fragment(&mut self.fragmentizer);
 
             // We only need to handle line fragments
             match fragment_info {
