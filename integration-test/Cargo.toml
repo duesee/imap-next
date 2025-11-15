@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 bstr = { version = "1.12.1", default-features = false }
-bytes = "1.10.1"
+bytes = "1.11.0"
 imap-codec = { version = "2.0.0-alpha.6" }
 imap-next = { path = ".." }
 tokio = { version = "1.48.0", features = ["macros", "net", "rt", "time"] }
